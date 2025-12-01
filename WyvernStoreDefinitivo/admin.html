@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WyvernStore – Panel Admin</title>
+
+  <link rel="stylesheet" href="styles.css" />
+  <script type="module" src="js/admin.js"></script>
+</head>
+<body class="admin-body">
+  <header>
+    <nav>
+      <div class="logo">WyvernStore</div>
+      <ul class="nav-links"></ul>
+      <div class="nav-right">
+        <span id="admin-user-label" class="user-label"></span>
+        <button id="admin-back-btn" class="login-btn">Volver a tienda</button>
+        <button id="admin-logout-btn" class="cart-icon">Cerrar sesión</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <h1 class="admin-title">Panel administrativo 🛠</h1>
+    <p class="admin-subtitle">
+      Gestiona el catálogo y revisa el estado de los pedidos.
+    </p>
+
+    <div class="admin-grid">
+      <!-- GESTIÓN DE PRODUCTOS -->
+      <section class="admin-card">
+        <div class="admin-card-header">
+          <h2>Productos 📚</h2>
+          <button id="new-product-btn" class="btn-small btn-primary">
+            + Nuevo producto
+          </button>
+        </div>
+
+        <div class="admin-card-body">
+          <div class="admin-filters">
+            <input
+              type="text"
+              id="product-search"
+              placeholder="Buscar por nombre..."
+              class="search-bar small"
+            />
+            <select id="product-category-filter" class="select-small">
+              <option value="">Todas las categorías</option>
+            </select>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>ID (row)</th>
+                  <th>Categoría</th>
+                  <th>Nombre</th>
+                  <th>Precio</th>
+                  <th>Stock</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="product-table-body">
+                <!-- filas dinámicas -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- DASHBOARD DE PEDIDOS -->
+      <section class="admin-card">
+        <div class="admin-card-header">
+          <h2>Pedidos 📦</h2>
+        </div>
+
+        <div class="admin-card-body">
+          <p class="admin-hint">
+            
+            <code>loadOrdersFromBackend</code> y
+            <code>updateOrderStatusInBackend</code> que están en
+            <strong>admin.js</strong>.
+          </p>
+
+          <div class="table-wrapper">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>ID Pedido</th>
+                  <th>Cliente</th>
+                  <th>Resumen</th>
+                  <th>Total</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="orders-table-body">
+                <!-- filas dinámicas -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- MODAL DE PRODUCTO (crear / editar) -->
+  <div id="product-modal-overlay" class="auth-overlay" aria-hidden="true">
+    <div class="auth-modal admin-modal">
+      <h3 id="product-modal-title">Nuevo producto</h3>
+
+      <form id="product-form">
+        <input type="hidden" id="product-row" />
+
+        <label class="auth-label">
+          Categoría (sheetKey)
+          <input id="product-sheetKey" type="text" required />
+        </label>
+
+        <label class="auth-label">
+          Nombre
+          <input id="product-name" type="text" required />
+        </label>
+
+        <label class="auth-label">
+          Precio
+          <input id="product-price" type="number" step="0.01" required />
+        </label>
+
+        <label class="auth-label">
+          Stock
+          <input id="product-stock" type="number" min="0" required />
+        </label>
+
+        <label class="auth-label">
+          URL de imagen
+          <input id="product-img" type="url" />
+        </label>
+
+        <label class="auth-label">
+          Descripción
+          <textarea id="product-description" rows="3"></textarea>
+        </label>
+
+        <p class="auth-error" id="product-form-error"></p>
+
+        <button type="submit" class="btn-primary auth-submit">
+          Guardar cambios
+        </button>
+      </form>
+
+      <button id="product-modal-close" class="btn-ghost btn-small auth-close">
+        Cancelar
+      </button>
+    </div>
+  </div>
+</body>
+</html>

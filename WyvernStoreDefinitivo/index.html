@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WyvernStore</title>
+
+  <!-- Estilos externos -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Lógica de la tienda (usa imports ESModules dentro de main.js) -->
+  <script type="module" src="js/main.js"></script>
+</head>
+
+<body>
+  <header>
+    <nav>
+      <div class="logo">WyvernStore</div>
+
+      <ul class="nav-links">
+        <!-- (Vacío por ahora, lo puedes usar luego para Inicio/Catálogo/etc.) -->
+      </ul>
+
+      <!-- Zona derecha: login + usuario + carrito -->
+      <div class="nav-right">
+
+        <!-- Botón login / logout -->
+        <button id="login-btn" class="login-btn">Iniciar sesión</button>
+
+        <!-- Muestra el correo del usuario logueado -->
+        <span id="user-label" class="user-label"></span>
+
+        <!-- Botón Carrito -->
+        <button id="cart-icon-btn" class="cart-icon" aria-label="Abrir carrito">
+          Carrito (0)
+        </button>
+
+        <!-- 🔥 BOTÓN ADMIN (oculto por defecto, solo aparece si es admin) -->
+        <button id="admin-panel-btn" class="admin-btn" style="display:none;">
+          🛠 Admin Panel
+        </button>
+
+      </div>
+    </nav>
+  </header>
+
+  <div class="container">
+    <!-- Buscador -->
+    <div class="search-container">
+      <input id="searchInput" class="search-bar" type="text" placeholder=" Buscar cómics..." />
+      <button id="search-btn" class="search-btn">🔍</button>
+    </div>
+
+    <!-- CARRUSEL -->
+    <section class="carousel-section">
+      <h2 class="carousel-title">Destacados</h2>
+      <div class="carousel-container">
+        <button class="carousel-btn prev" onclick="moveCarousel(-1)">‹</button>
+        <div class="carousel"></div>
+        <button class="carousel-btn next" onclick="moveCarousel(1)">›</button>
+      </div>
+      <div id="carouselDots" class="carousel-dots"></div>
+    </section>
+
+    <!-- CATÁLOGO -->
+    <section id="productos" class="products-section">
+      <h2 class="section-title">Catálogo</h2>
+
+      <!-- Categorías (tabs) generados por JS -->
+      <div id="tabsRow" class="tabs-row"></div>
+
+      <!-- Productos -->
+      <div id="productsGrid" class="products-grid">
+        <div id="loadingMessage" style="text-align:center;width:100%;padding:40px;color:#aaa">
+          Cargando productos...
+        </div>
+      </div>
+    </section>
+
+    <!-- Botón ver más -->
+    <div class="load-more">
+      <button class="load-more-btn" onclick="loadMore()">
+        Ver más <span class="arrow-down">↓</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-links">
+    <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
+    <a href="terminos.html">TÉRMINOS</a>
+    <a href="privacidad.html">PRIVACIDAD</a>
+    <a href="contacto.html">CONTACTO</a>
+  </div>
+
+  <p class="footer-copy">
+    © 2025 WyvernStore. Todos los derechos reservados.
+  </p>
+</footer>
+
+
+  <!-- POPUP CARRITO -->
+  <div id="cart-popup-overlay" aria-hidden="true">
+    <div id="cart-popup" role="dialog" aria-modal="true">
+      <h3 style="margin-bottom:8px">🛒 Tu carrito</h3>
+      <div id="cart-items-container"><p style="color:#999;text-align:center">Carrito vacío</p></div>
+      <div id="cart-total"></div><div id="cart-actions"></div>
+    </div>
+  </div>
+
+  <!-- MODAL IMAGEN -->
+  <div id="img-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); align-items:center; justify-content:center; z-index:20000;">
+    <div style="max-width:90vw; max-height:90vh; padding:12px;">
+      <img id="img-modal-img" style="max-width:100%; max-height:90vh; border-radius:8px;" />
+      <div style="text-align:center;margin-top:8px;"><button id="img-modal-close" class="btn-small btn-ghost">Cerrar</button></div>
+    </div>
+  </div>
+
+  <!-- MODAL LOGIN -->
+  <div id="auth-overlay" class="auth-overlay" aria-hidden="true">
+    <div class="auth-modal">
+      <h3 id="auth-title">Iniciar sesión</h3>
+
+      <form id="auth-form">
+        <label class="auth-label">Correo <input id="auth-email" type="email" required /></label>
+        <label class="auth-label">Contraseña <input id="auth-password" type="password" minlength="6" required /></label>
+        <p id="auth-error" class="auth-error"></p>
+        <button type="submit" class="btn-primary auth-submit">Entrar</button>
+      </form>
+
+      <button id="auth-toggle" class="auth-toggle">¿No tienes cuenta? Regístrate</button>
+      <button id="auth-close" class="btn-ghost btn-small auth-close">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- 🔥 BOTÓN ADMIN REDIRECCIONA A PANEL -->
+  <script>
+    document.getElementById("admin-panel-btn").onclick = () => {
+      window.location.href = "admin.html";
+    };
+  </script>
+
+</body>
+</html>
