@@ -156,17 +156,19 @@ export function renderProducts(products, sheetKey) {
       </div>
     `;
 
-    // Imagen real usando la función global getSafeImageUrl
+    // --- Imagen: implementación tomada del script nuevo ---
     const wrap = card.querySelector(".image-wrap");
-    if (imgUrl && window.getSafeImageUrl) {
-      const safeUrl = window.getSafeImageUrl(imgUrl);
-      const imgEl = makeImgEl(safeUrl, name, "product-image", true);
+    if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
+      // Usamos makeImgEl con eager = true para forzar carga inmediata (proxy si makeImgEl lo hace)
+      const imgEl = makeImgEl(imgUrl, name, "product-image", true);
+      imgEl.style.maxHeight = "320px";
+      imgEl.style.width = "auto";
       wrap.innerHTML = "";
       wrap.appendChild(imgEl);
-
-      // Para el modal usamos la URL original (sin modificaciones)
+      // El modal usa la URL original
       imgEl.addEventListener("click", () => openImageModal(imgUrl, name));
     }
+    // -------------------------------------------------------
 
     frag.appendChild(card);
   });
