@@ -4,6 +4,7 @@ import { cart, setCart, saveCart } from "./state.js";
 import {
   finalizePurchaseOnServer,
   refreshAllCardDisplays,
+  refreshAllCardDisplays,
   updateCartUI,
 } from "./cart.js";
 import { WHATSAPP_NUMBER, API_URL } from "./config.js";
@@ -331,6 +332,7 @@ document.addEventListener("click", async (e) => {
       try { saveCart(); } catch (e) {}
       try { updateCartUI(); } catch (e) {}
       try { refreshAllCardDisplays([]); } catch (e) {}
+      try { closeCartPopup(); } catch(e) {}  
       if (otpOverlay) otpOverlay.style.display = "none";
       if (cardOverlay) cardOverlay.style.display = "none";
       document.body.style.overflow = "";
@@ -399,3 +401,4 @@ export async function sendToWhatsApp(lastProductsCache) {
   try { saveCart(); } catch (e) {}
   try { updateCartUI(); } catch (e) {}
 }
+
