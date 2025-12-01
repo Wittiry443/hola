@@ -4,7 +4,7 @@ import {
   setCart,
   saveCart,
   normalizeProductKey,
-  lastProductsCache,      // <- lo usamos en varias funciones
+  lastProductsCache, // <- lo usamos en varias funciones
 } from "./state.js";
 
 import {
@@ -313,7 +313,7 @@ export function openCartPopup() {
 
   cartItemsContainer.innerHTML = html;
   const total = updateCartUI();
-  cartTotalEl.innerHTML = `💰 Total: <span style="color:#9D4EDD">${Number(
+  cartTotalEl.innerHTML = ` Total: <span style="color:#9D4EDD">${Number(
     total
   ).toLocaleString("de-DE")}</span>`;
 
@@ -371,12 +371,15 @@ if (cartPopupOverlay)
   });
 
 // ======================================
-// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP
+// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP (AHORA FINALIZA Y LIMPIA)
 // ======================================
 
-export function sendToWhatsApp() {
+export async function sendToWhatsApp() {
   const items = getCartItems();
-  if (!items.length) return alert("Tu carrito está vacío 🛒");
+  if (!items.length) {
+    alert("Tu carrito está vacío 🛒");
+    return;
+  }
 
   let message = "🛒 *Pedido desde WyvernStore*\n\n";
   let total = 0;
@@ -390,7 +393,44 @@ export function sendToWhatsApp() {
 
   const phone = "573207378992"; // cambia por tu número real
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank");
+
+  // Intentamos finalizar en servidor (decrementos). Si falla, preguntar al usuario.
+  let failures = [];
+  try {
+    failures = await finalizePurchaseOnServer(items, lastProductsCache);
+  } catch (e) {
+    failures = items.slice();
+  }
+
+  if (!failures.length) {
+    // éxito: abrimos WA, limpiamos carrito y cerramos popup
+    window.open(url, "_blank");
+    try { setCart([]); } catch (e) {}
+    try { saveCart(); } catch (e) {}
+    try { updateCartUI(); } catch (e) {}
+    try { refreshAllCardDisplays(); } catch (e) {}
+    try { closeCartPopup(); } catch (e) {}
+  } else {
+    const proceed = confirm(
+      "No fue posible actualizar el stock en el servidor para algunos productos. ¿Deseas enviar el pedido de todas maneras?"
+    );
+    if (!proceed) {
+      // sincronizamos stocks fallidos
+      await Promise.all(failures.map(it => fetchServerStock(mapToAvailableSheetKey(it.sheetKey) || it.sheetKey, it.row)
+        .then(s => { if (s !== null) applyNewStockToDOM(mapToAvailableSheetKey(it.sheetKey) || it.sheetKey, it.row, s, getReservedQty); })
+        .catch(()=>{})
+      ));
+      refreshAllCardDisplays();
+      return;
+    }
+    // el usuario decide enviar igual: abrimos WA, limpiamos carrito y cerramos popup
+    window.open(url, "_blank");
+    try { setCart([]); } catch (e) {}
+    try { saveCart(); } catch (e) {}
+    try { updateCartUI(); } catch (e) {}
+    try { refreshAllCardDisplays(); } catch (e) {}
+    try { closeCartPopup(); } catch (e) {}
+  }
 }
 
 // ======================================
