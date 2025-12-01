@@ -185,7 +185,7 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
   refreshCardStockDisplay(sheetKey, row, cache);
   updateCartUI();
 
-  // intento de decremento en servidor
+  // intento de decremento en servidor (no bloqueante)
   updateStockOnServer_decrement(
     sheetKey,
     row,
@@ -226,31 +226,76 @@ export function removeFromCart(idx) {
 }
 
 // ======================================
-// FINALIZAR COMPRA
+// FINALIZAR COMPRA (mejorada: devuelve detalles)
 // ======================================
 
+/*
+  Devuelve: { successes: [{ item, newStock }], failures: [{ item, reason }] }
+*/
 export async function finalizePurchaseOnServer(items, cache = lastProductsCache) {
+  const successes = [];
   const failures = [];
-  if (!Array.isArray(items) || items.length === 0) return failures;
+  if (!Array.isArray(items) || items.length === 0) return { successes: [], failures: [] };
 
+  // Ejecutar todos los decrementos (en paralelo)
   const promises = items.map(async it => {
     const qty = Number(it.qty || 0);
-    if (!qty) return { ok: true, item: it };
-    const res = await updateStockOnServer_decrement(
-      it.sheetKey,
-      it.row,
-      qty,
-      getReservedQty,
-      (sk, r) => refreshCardStockDisplay(sk, r, cache)
-    );
-    return { ok: !!res.ok, item: it };
+    if (!qty) return { ok: true, item: it, newStock: null };
+
+    try {
+      // updateStockOnServer_decrement devuelve un objeto { ok: boolean, newStock: number } (o similar)
+      const res = await updateStockOnServer_decrement(
+        it.sheetKey,
+        it.row,
+        qty,
+        getReservedQty,
+        (sk, r) => refreshCardStockDisplay(sk, r, cache)
+      );
+      if (res && res.ok) {
+        return { ok: true, item: it, newStock: res.newStock !== undefined ? Number(res.newStock) : null };
+      } else {
+        return { ok: false, item: it, reason: (res && res.error) ? res.error : "server_error" };
+      }
+    } catch (err) {
+      return { ok: false, item: it, reason: String(err || "exception") };
+    }
   });
 
   const results = await Promise.all(promises);
-  results.forEach(r => {
-    if (!r.ok) failures.push(r.item);
-  });
-  return failures;
+
+  // Procesar resultados: aplicar nuevos stocks para los éxitos y compilar fallos
+  for (const r of results) {
+    if (r.ok) {
+      successes.push({ item: r.item, newStock: r.newStock });
+      // actualizar DOM/serverStock local si viene newStock
+      try {
+        const mapped = mapToAvailableSheetKey(r.item.sheetKey) || r.item.sheetKey;
+        if (r.newStock !== null && r.newStock !== undefined) {
+          applyNewStockToDOM(mapped, r.item.row, Number(r.newStock), getReservedQty);
+        } else {
+          // si no hay newStock, refrescamos desde servidor como fallback
+          const srv = await fetchServerStock(mapped, r.item.row);
+          if (srv !== null) applyNewStockToDOM(mapped, r.item.row, Number(srv), getReservedQty);
+        }
+        refreshCardStockDisplay(r.item.sheetKey, r.item.row, cache);
+      } catch (e) {
+        // swallow
+      }
+    } else {
+      failures.push({ item: r.item, reason: r.reason || "unknown" });
+      // Intentar sincronizar stock al detectar fallo (mejorará la UI)
+      try {
+        const mapped = mapToAvailableSheetKey(r.item.sheetKey) || r.item.sheetKey;
+        const srv = await fetchServerStock(mapped, r.item.row);
+        if (srv !== null) {
+          applyNewStockToDOM(mapped, r.item.row, Number(srv), getReservedQty);
+          refreshCardStockDisplay(r.item.sheetKey, r.item.row, cache);
+        }
+      } catch (e) {}
+    }
+  }
+
+  return { successes, failures };
 }
 
 // ======================================
@@ -313,7 +358,7 @@ export function openCartPopup() {
 
   cartItemsContainer.innerHTML = html;
   const total = updateCartUI();
-  cartTotalEl.innerHTML = ` Total: <span style="color:#9D4EDD">${Number(
+  cartTotalEl.innerHTML = `💰 Total: <span style="color:#9D4EDD">${Number(
     total
   ).toLocaleString("de-DE")}</span>`;
 
@@ -371,7 +416,7 @@ if (cartPopupOverlay)
   });
 
 // ======================================
-// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP (AHORA FINALIZA Y LIMPIA)
+// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP (AHORA MANEJA PARCIALES)
 // ======================================
 
 export async function sendToWhatsApp() {
@@ -381,56 +426,89 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  let message = "🛒 *Pedido desde WyvernStore*\n\n";
-  let total = 0;
-
-  items.forEach(p => {
-    message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
-    total += parsePriceNumber(p.price) * p.qty;
-  });
-
-  message += `\nTotal: *$${total}*\n`;
-
-  const phone = "573207378992"; // cambia por tu número real
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-
-  // Intentamos finalizar en servidor (decrementos). Si falla, preguntar al usuario.
-  let failures = [];
+  // intentar decrementar en servidor por item
+  let result = { successes: [], failures: [] };
   try {
-    failures = await finalizePurchaseOnServer(items, lastProductsCache);
+    result = await finalizePurchaseOnServer(items, lastProductsCache);
   } catch (e) {
-    failures = items.slice();
+    result = { successes: [], failures: items.map(it => ({ item: it, reason: String(e) })) };
   }
 
-  if (!failures.length) {
-    // éxito: abrimos WA, limpiamos carrito y cerramos popup
-    window.open(url, "_blank");
-    try { setCart([]); } catch (e) {}
-    try { saveCart(); } catch (e) {}
-    try { updateCartUI(); } catch (e) {}
-    try { refreshAllCardDisplays(); } catch (e) {}
-    try { closeCartPopup(); } catch (e) {}
-  } else {
-    const proceed = confirm(
-      "No fue posible actualizar el stock en el servidor para algunos productos. ¿Deseas enviar el pedido de todas maneras?"
-    );
-    if (!proceed) {
-      // sincronizamos stocks fallidos
-      await Promise.all(failures.map(it => fetchServerStock(mapToAvailableSheetKey(it.sheetKey) || it.sheetKey, it.row)
-        .then(s => { if (s !== null) applyNewStockToDOM(mapToAvailableSheetKey(it.sheetKey) || it.sheetKey, it.row, s, getReservedQty); })
-        .catch(()=>{})
-      ));
-      refreshAllCardDisplays();
-      return;
+  // Si hay éxitos: removerlos del carrito local
+  if (Array.isArray(result.successes) && result.successes.length > 0) {
+    const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
+    // eliminar del carrito los que coinciden
+    for (let i = cart.length - 1; i >= 0; i--) {
+      const key = `${cart[i].sheetKey}::${cart[i].row}`;
+      if (successKeys.includes(key)) cart.splice(i, 1);
     }
-    // el usuario decide enviar igual: abrimos WA, limpiamos carrito y cerramos popup
+    setCart(cart);
+  }
+
+  // Si no hay fallos -> todo ok: abrir WA y limpiar popup
+  if ((!result.failures || result.failures.length === 0)) {
+    // construir mensaje solo con los items que se pagaron (successes)
+    const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
+    let message = "🛒 *Pedido desde WyvernStore*\n\n";
+    let total = 0;
+    paidItems.forEach(p => {
+      message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
+      total += parsePriceNumber(p.price) * p.qty;
+    });
+    message += `\nTotal: *$${total}*\n`;
+    const phone = "573207378992";
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
-    try { setCart([]); } catch (e) {}
+
+    // limpieza y UI
     try { saveCart(); } catch (e) {}
     try { updateCartUI(); } catch (e) {}
     try { refreshAllCardDisplays(); } catch (e) {}
     try { closeCartPopup(); } catch (e) {}
+    return;
   }
+
+  // Si hay fallos (parciales o totales):
+  // preguntar al usuario si quiere enviar igual y, si acepta, abrir WA con ITEMS PAGADOS + ITEMS SIN PAGAR (según tu UX)
+  const failures = result.failures || [];
+  const failedItems = failures.map(f => f.item);
+  const paidItems = result.successes.map(s => s.item);
+
+  const proceed = confirm(
+    `No fue posible actualizar el stock en el servidor para ${failedItems.length} productos. ¿Deseas enviar el pedido de los demás productos (los que sí se reservaron) por WhatsApp?`
+  );
+
+  if (!proceed) {
+    // sincronizar stocks fallidos (mejorar UI) y salir
+    await Promise.all(failures.map(f => {
+      const mapped = mapToAvailableSheetKey(f.item.sheetKey) || f.item.sheetKey;
+      return fetchServerStock(mapped, f.item.row).then(s => {
+        if (s !== null) applyNewStockToDOM(mapped, f.item.row, Number(s), getReservedQty);
+      }).catch(()=>{});
+    }));
+    refreshAllCardDisplays();
+    return;
+  }
+
+  // Si el usuario acepta enviar lo que sí se reservó:
+  if (paidItems.length) {
+    let message = "🛒 *Pedido desde WyvernStore* (parcial)\n\n";
+    let total = 0;
+    paidItems.forEach(p => {
+      message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
+      total += parsePriceNumber(p.price) * p.qty;
+    });
+    message += `\nTotal: *$${total}*\n`;
+    const phone = "573207378992";
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank");
+  }
+
+  // Guardar cart (ya removimos los pagados)
+  try { saveCart(); } catch(e){}
+  try { updateCartUI(); } catch(e){}
+  try { refreshAllCardDisplays(); } catch(e){}
+  if (cart.length === 0) try { closeCartPopup(); } catch(e){}
 }
 
 // ======================================
