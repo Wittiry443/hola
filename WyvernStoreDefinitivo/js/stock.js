@@ -99,17 +99,16 @@ export async function updateStockOnServer_decrement(
   refreshCardStockDisplayCb
 ) {
   if (!qty || qty <= 0) return { ok: false };
-  // allow fallback to raw key if map fails
   const mapped = mapToAvailableSheetKey(sheetKeyRaw) || sheetKeyRaw;
   if (!mapped) return { ok: false };
 
   async function applyAndRefresh(newStock) {
     applyNewStockToDOM(mapped, row, newStock, getReservedQtyCb);
-    if (refreshCardStockDisplayCb)
-      refreshCardStockDisplayCb(mapped, row);
+    if (refreshCardStockDisplayCb) refreshCardStockDisplayCb(mapped, row);
   }
 
   try {
+    // intento único primero
     const resp = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -121,54 +120,65 @@ export async function updateStockOnServer_decrement(
       })
     });
 
-    const { text, json } = await safeParseJsonText(resp);
+    const text = await resp.text().catch(() => null);
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch(e){ json = null; }
 
-    if (!resp.ok) {
-      console.warn("decrement single non-ok", mapped, row, qty, resp.status, text);
-    } else {
-      // robust detection of returned stock
-      if (json && !json.error) {
-        const newStock =
-          json.newStock ?? json.new_stock ?? json.stock ?? json.quantity ?? null;
-        if (newStock !== null && newStock !== undefined) {
-          await applyAndRefresh(Number(newStock));
-          return { ok: true, newStock: Number(newStock) };
+    // Si el worker responde correctamente con nuevo stock (cualquier nombre de campo)
+    if (resp.ok && json && !json.error) {
+      const newStock = json.newStock ?? json.new_stock ?? json.stock ?? json.quantity ?? null;
+      if (newStock !== null && newStock !== undefined) {
+        await applyAndRefresh(Number(newStock));
+        return { ok: true, newStock: Number(newStock) };
+      }
+      if (json.ok === true || json.success === true) {
+        const srv = await fetchServerStock(mapped, row);
+        if (srv !== null) {
+          await applyAndRefresh(Number(srv));
+          return { ok: true, newStock: Number(srv) };
         }
-        // if json ok but no stock field, still consider ok if worker signals success (optional)
-        if (json.ok === true || json.success === true) {
-          // try to refresh from server to get definitive stock
-          const srv = await fetchServerStock(mapped, row);
-          if (srv !== null) {
-            await applyAndRefresh(Number(srv));
-            return { ok: true, newStock: Number(srv) };
-          }
-          return { ok: true, newStock: null };
-        }
-      } else {
-        console.warn("decrement single unexpected json", mapped, row, qty, json);
+        return { ok: true, newStock: null };
       }
     }
+
+    // Si el worker indica que no soporta 'decrement', hacemos fallback a 'set'
+    if (json && json.message && /no soport|not support|unsupported|acción no soportada/i.test(String(json.message))) {
+      console.warn("Worker no soporta decrement -> fallback a set:", mapped, row, qty, json.message);
+      // obtengo stock actual del servidor
+      const serverStock = await fetchServerStock(mapped, row);
+      if (serverStock === null) {
+        console.warn("No fue posible leer stock del servidor para fallback set", mapped, row);
+        return { ok: false };
+      }
+      const newStock = Math.max(0, Number(serverStock) - Number(qty));
+      const setOk = await updateStockOnServer_set(mapped, row, newStock);
+      if (setOk) {
+        await applyAndRefresh(newStock);
+        return { ok: true, newStock: Number(newStock) };
+      }
+      return { ok: false };
+    }
+
+    // si respuesta no fue ok -> seguir al fallback por unidades abajo
   } catch (e) {
-    console.error("updateStockOnServer_decrement error (single)", e, mapped, row, qty);
-    // fallback will attempt per-unit
+    console.error("updateStockOnServer_decrement error (single try)", e, mapped, row, qty);
+    // seguimos a fallback paralelo más abajo
   }
 
-  // fallback: parallel singles (one request per qty)
+  // fallback: varias requests individuales (lo mantenemos por compatibilidad)
   const promises = [];
   for (let i = 0; i < qty; i++) {
     promises.push(
       fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "decrement",
-          sheetKey: mapped,
-          row: String(row)
-        })
+        body: JSON.stringify({ action: "decrement", sheetKey: mapped, row: String(row) })
       })
         .then(async r => {
-          const { text, json } = await safeParseJsonText(r);
-          return { ok: r.ok, json, status: r.status, text };
+          const t = await r.text().catch(() => null);
+          let j = null;
+          try { j = t ? JSON.parse(t) : null; } catch(e){ j = null; }
+          return { ok: r.ok, json: j, status: r.status, text: t };
         })
         .catch(err => ({ ok: false, error: String(err) }))
     );
@@ -181,8 +191,7 @@ export async function updateStockOnServer_decrement(
   for (const res of results) {
     if (res && res.ok && res.json && !res.json.error) {
       successCount++;
-      const candidate =
-        res.json.newStock ?? res.json.new_stock ?? res.json.stock ?? res.json.quantity ?? undefined;
+      const candidate = res.json.newStock ?? res.json.new_stock ?? res.json.stock ?? res.json.quantity ?? undefined;
       if (candidate !== undefined) lastNewStock = Number(candidate);
     }
   }
@@ -193,7 +202,19 @@ export async function updateStockOnServer_decrement(
     const server = await fetchServerStock(mapped, row);
     if (server !== null) await applyAndRefresh(Number(server));
   } else {
-    // nothing succeeded: attempt to log for debugging
+    // Si nada funcionó, intentar fallback por SET usando lectura-archivo (mejor que fallar sin acción)
+    try {
+      const srv = await fetchServerStock(mapped, row);
+      if (srv !== null) {
+        const newStockSet = Math.max(0, Number(srv) - Number(qty));
+        const okSet = await updateStockOnServer_set(mapped, row, newStockSet);
+        if (okSet) {
+          await applyAndRefresh(newStockSet);
+          return { ok: true, newStock: newStockSet };
+        }
+      }
+    } catch (e) { /* swallow */ }
+
     console.warn("updateStockOnServer_decrement: no successful responses", mapped, row, qty, results.slice(0,5));
   }
 
@@ -228,3 +249,4 @@ export async function updateStockOnServer_set(sheetKeyRaw, row, newStock) {
   }
   return false;
 }
+
