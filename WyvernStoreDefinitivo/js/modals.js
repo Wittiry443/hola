@@ -4,17 +4,20 @@ import { cart, setCart, saveCart } from "./state.js";
 import {
   finalizePurchaseOnServer,
   refreshAllCardDisplays,
-  refreshAllCardDisplays,
   updateCartUI,
+  closeCartPopup,
 } from "./cart.js";
 import { WHATSAPP_NUMBER, API_URL } from "./config.js";
 
 /* -------------------------
    Elementos del DOM (pueden ser null si el script corre antes del DOM)
    ------------------------- */
-const imgModalOverlay = typeof document !== "undefined" ? document.getElementById("img-modal-overlay") : null;
-const imgModalImg = typeof document !== "undefined" ? document.getElementById("img-modal-img") : null;
-const imgModalClose = typeof document !== "undefined" ? document.getElementById("img-modal-close") : null;
+const imgModalOverlay =
+  typeof document !== "undefined" ? document.getElementById("img-modal-overlay") : null;
+const imgModalImg =
+  typeof document !== "undefined" ? document.getElementById("img-modal-img") : null;
+const imgModalClose =
+  typeof document !== "undefined" ? document.getElementById("img-modal-close") : null;
 
 /* -------------------------
    Helpers de proxificación (evitar doble proxy)
@@ -32,7 +35,6 @@ function getProxiedIfNeeded(url) {
   if (!url) return "";
   const s = String(url);
   if (isAlreadyProxied(s)) return s;
-  // construye proxied URL seguro
   return API_URL.replace(/\/$/, "") + "/image-proxy?url=" + encodeURIComponent(s);
 }
 
@@ -42,45 +44,43 @@ function getProxiedIfNeeded(url) {
 export function openImageModal(url, alt) {
   if (!url) return;
   if (!imgModalImg || !imgModalOverlay) {
-    // si los nodos no existen, intenta crearlos de forma mínima para que funcione
     createImageModalNodes();
   }
   const final = getProxiedIfNeeded(url);
-  if (imgModalImg) {
-    imgModalImg.alt = alt || "";
-    imgModalImg.loading = "eager";
-    imgModalImg.src = final;
-    // manejo de error visible (no eliminar el elemento)
-    imgModalImg.addEventListener(
-      "error",
-      function onErr(ev) {
-        imgModalImg.removeEventListener("error", onErr);
-        // mostrar texto alternativo en overlay
-        const placeholder = document.createElement("div");
-        placeholder.className = "img-modal-placeholder";
-        placeholder.style = "color:#f88;padding:12px;font-size:1rem;background:transparent";
-        placeholder.innerText = "Imagen no disponible";
-        // reemplazamos la imagen por placeholder (pero conservamos imgModalImg.src en caso de reintentos)
-        if (imgModalImg.parentNode) {
-          imgModalImg.parentNode.appendChild(placeholder);
-        }
-      },
-      { once: true }
-    );
+  const imgEl = document.getElementById("img-modal-img");
+  const overlayEl = document.getElementById("img-modal-overlay");
+  if (imgEl) {
+    imgEl.alt = alt || "";
+    imgEl.loading = "eager";
+    imgEl.src = final;
+    // manejar error sin eliminar el nodo
+    const onErr = function onErr() {
+      imgEl.removeEventListener("error", onErr);
+      // mostrar placeholder textual
+      let ph = document.querySelector(".img-modal-placeholder");
+      if (!ph) {
+        ph = document.createElement("div");
+        ph.className = "img-modal-placeholder";
+        ph.style.cssText = "color:#f88;padding:12px;font-size:1rem;background:transparent";
+        ph.innerText = "Imagen no disponible";
+        imgEl.parentNode && imgEl.parentNode.appendChild(ph);
+      }
+    };
+    imgEl.addEventListener("error", onErr, { once: true });
   }
-  if (imgModalOverlay) {
-    imgModalOverlay.style.display = "flex";
+  if (overlayEl) {
+    overlayEl.style.display = "flex";
     document.body.style.overflow = "hidden";
   }
 }
 
 export function closeImageModal() {
-  if (imgModalOverlay) imgModalOverlay.style.display = "none";
-  if (imgModalImg) {
-    // limpiar src para liberar memoria y evitar reintentos automáticos
-    imgModalImg.src = "";
-    imgModalImg.alt = "";
-    // eliminar posibles placeholders creados
+  const overlayEl = document.getElementById("img-modal-overlay");
+  const imgEl = document.getElementById("img-modal-img");
+  if (overlayEl) overlayEl.style.display = "none";
+  if (imgEl) {
+    imgEl.src = "";
+    imgEl.alt = "";
     const ph = document.querySelector(".img-modal-placeholder");
     if (ph && ph.parentNode) ph.parentNode.removeChild(ph);
   }
@@ -93,11 +93,16 @@ function createImageModalNodes() {
   if (!document.getElementById("img-modal-overlay")) {
     const overlay = document.createElement("div");
     overlay.id = "img-modal-overlay";
-    overlay.style = "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.9);align-items:center;justify-content:center;z-index:20000";
-    overlay.innerHTML = `<img id="img-modal-img" style="max-width:90vw;max-height:90vh;border-radius:12px" alt="" /> <button id="img-modal-close" style="position:fixed;top:18px;right:18px;background:transparent;border:none;color:#fff;font-size:1.6rem">×</button>`;
+    overlay.style =
+      "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.9);align-items:center;justify-content:center;z-index:20000";
+    overlay.innerHTML =
+      `<div style="position:relative;max-width:90vw;max-height:90vh;">
+         <img id="img-modal-img" style="max-width:90vw;max-height:90vh;border-radius:12px;display:block" alt="" />
+         <button id="img-modal-close" style="position:absolute;top:-8px;right:-8px;background:#111;border-radius:999px;border:1px solid #333;color:#fff;font-size:1.2rem;padding:6px 8px;cursor:pointer">×</button>
+       </div>`;
     document.body.appendChild(overlay);
   }
-  // refresh references
+  // refresh references and listeners
   const overlay = document.getElementById("img-modal-overlay");
   const img = document.getElementById("img-modal-img");
   const close = document.getElementById("img-modal-close");
@@ -173,7 +178,6 @@ function ensureCardModalBase() {
     document.body.appendChild(o);
   }
 
-  // Short listeners (document-level handlers exist más abajo, pero dejamos estos mínimos)
   const cardCancel = document.getElementById("card-cancel");
   if (cardCancel) cardCancel.addEventListener("click", closeCardPaymentModal);
 }
@@ -307,42 +311,93 @@ document.addEventListener("click", async (e) => {
     }
 
     const items = (window._pendingPayment && window._pendingPayment.items) || [];
-    let failures = [];
+    let result = { successes: [], failures: [] };
     try {
-      // finalizePurchaseOnServer debería devolver lista de items que fallaron (o [])
       const res = await finalizePurchaseOnServer(items);
-      // si la función retorna objeto { ok, failures } o similar, adaptarlo aquí. Intentamos detectar:
+      // compatibilidad con distintas formas de retorno
       if (Array.isArray(res)) {
-        failures = res;
+        // antiguo: array de fallidos
+        result.failures = res;
+      } else if (res && Array.isArray(res.failures) && Array.isArray(res.successes)) {
+        result = res;
       } else if (res && Array.isArray(res.failures)) {
-        failures = res.failures;
-      } else if (res && res.ok === true) {
-        failures = [];
+        result.failures = res.failures;
       } else {
-        // fallback: si la función devolvió algo inesperado, tratamos como éxito parcial
-        failures = [];
+        // si la función devolvió { successes, failures } parcialmente, intentar extraer
+        result.successes = res.successes || [];
+        result.failures = res.failures || [];
       }
     } catch (err) {
-      failures = items.slice();
+      // en error total, tratamos como todos fallidos
+      result = { successes: [], failures: items.map(it => ({ item: it, reason: String(err) })) };
     }
 
+    // Si hubo éxitos, eliminarlos del carrito local y actualizar UI
+    try {
+      if (Array.isArray(result.successes) && result.successes.length > 0) {
+        const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
+        for (let i = cart.length - 1; i >= 0; i--) {
+          const key = `${cart[i].sheetKey}::${cart[i].row}`;
+          if (successKeys.includes(key)) cart.splice(i, 1);
+        }
+        setCart(cart);
+        saveCart();
+        updateCartUI();
+        refreshAllCardDisplays();
+      }
+    } catch (e) {
+      // swallow
+    }
+
+    // Manejo final según fallos
+    const failures = result.failures || [];
     if (failures.length === 0) {
       alert("Pago confirmado. Gracias por tu compra.");
-      try { setCart([]); } catch (e) {}
-      try { saveCart(); } catch (e) {}
-      try { updateCartUI(); } catch (e) {}
-      try { refreshAllCardDisplays([]); } catch (e) {}
-      try { closeCartPopup(); } catch(e) {}  
+      // limpiar pendientes y cerrar UI
+      window._pendingPayment = null;
       if (otpOverlay) otpOverlay.style.display = "none";
       if (cardOverlay) cardOverlay.style.display = "none";
       document.body.style.overflow = "";
-    } else {
-      alert("Hubo un problema actualizando stock para algunos productos. Se sincronizará la página.");
-      // cerramos modales y dejamos que la UI se sincronice desde elsewhere
-      if (otpOverlay) otpOverlay.style.display = "none";
-      if (cardOverlay) cardOverlay.style.display = "none";
-      document.body.style.overflow = "";
+      try { closeCartPopup(); } catch (e) {}
+      return;
     }
+
+    // Hay fallos (parciales o totales)
+    // Si hubo éxitos parciales, preguntar si se desea enviar pedido de los éxitos por WA
+    const paidCount = (result.successes || []).length;
+    const failedCount = failures.length;
+    if (paidCount > 0) {
+      const proceed = confirm(`Se completaron ${paidCount} productos, pero fallaron ${failedCount}. ¿Deseas enviar los productos reservados por WhatsApp ahora?`);
+      if (proceed) {
+        // armar mensaje solo con los items pagados (successes)
+        const paidItems = result.successes.map(s => s.item);
+        let message = "*Pedido (parcial) - WyvernStore*%0A%0A";
+        let total = 0;
+        paidItems.forEach(p => {
+          const itemTotal = parsePriceNumber(p._priceNum !== undefined ? p._priceNum : p.price) * Number(p.qty || 0);
+          total += itemTotal;
+          message += `*${p.name}*%0A   Cantidad: ${p.qty}%0A   Precio: ${Number(itemTotal).toLocaleString("de-DE")}%0A%0A`;
+        });
+        message += `*TOTAL: ${Number(total).toLocaleString("de-DE")}*%0A%0A`;
+        window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(decodeURIComponent(message))}`, "_blank");
+      } else {
+        alert("Se sincronizará la página para mostrar los stocks reales de los productos que fallaron.");
+      }
+    } else {
+      // ningún éxito
+      alert("Hubo un problema actualizando stock para todos los productos. Se sincronizará la página.");
+    }
+
+    // cerrar modales OTP y pago
+    if (otpOverlay) otpOverlay.style.display = "none";
+    if (cardOverlay) cardOverlay.style.display = "none";
+    document.body.style.overflow = "";
+    window._pendingPayment = null;
+    // refrescar displays ya fue llamado tras eliminar éxitos, pero forzamos sincronización
+    try { refreshAllCardDisplays(); } catch (e) {}
+    try { updateCartUI(); } catch (e) {}
+    // si el carrito quedó vacío, cerramos popup
+    try { if (!cart.length) closeCartPopup(); } catch(e){}
   }
 
   // OTP cancel
@@ -356,7 +411,7 @@ document.addEventListener("click", async (e) => {
 });
 
 /* -------------------------
-   WhatsApp (finalizar pedido y abrir WA)
+   WhatsApp (finalizar pedido y abrir WA) - ahora maneja éxitos parciales
    ------------------------- */
 export async function sendToWhatsApp(lastProductsCache) {
   if (!Array.isArray(cart) || cart.length === 0) {
@@ -364,41 +419,100 @@ export async function sendToWhatsApp(lastProductsCache) {
     return;
   }
 
-  let message = "*Nuevo Pedido - WyvernStore*%0A%0A";
-  let total = 0;
-  cart.forEach((item) => {
-    const itemTotal = parsePriceNumber(item._priceNum !== undefined ? item._priceNum : item.price) * Number(item.qty || 0);
-    total += itemTotal;
-    message += `*${item.name}*%0A   Cantidad: ${item.qty}%0A   Precio: ${Number(itemTotal).toLocaleString("de-DE")}%0A%0A`;
-  });
-  message += `*TOTAL: ${Number(total).toLocaleString("de-DE")}*%0A%0A`;
+  // generar mensaje completo (usamos esto como fallback si todo pasa)
+  const buildMessageFromItems = (items) => {
+    let message = "*Nuevo Pedido - WyvernStore*%0A%0A";
+    let total = 0;
+    items.forEach((item) => {
+      const itemTotal = parsePriceNumber(item._priceNum !== undefined ? item._priceNum : item.price) * Number(item.qty || 0);
+      total += itemTotal;
+      message += `*${item.name}*%0A   Cantidad: ${item.qty}%0A   Precio: ${Number(itemTotal).toLocaleString("de-DE")}%0A%0A`;
+    });
+    message += `*TOTAL: ${Number(total).toLocaleString("de-DE")}*%0A%0A`;
+    return message;
+  };
 
-  let failures = [];
+  let result = { successes: [], failures: [] };
   try {
     const res = await finalizePurchaseOnServer(cart, lastProductsCache);
     if (Array.isArray(res)) {
-      failures = res;
+      // compat: array means failures list
+      result.failures = res;
+    } else if (res && Array.isArray(res.failures) && Array.isArray(res.successes)) {
+      result = res;
     } else if (res && Array.isArray(res.failures)) {
-      failures = res.failures;
-    } else if (res && res.ok === true) {
-      failures = [];
+      result.failures = res.failures;
     } else {
-      failures = [];
+      result.successes = res.successes || [];
+      result.failures = res.failures || [];
     }
   } catch (e) {
-    failures = cart.slice();
+    // fallo total: tratar como que todo falló
+    result = { successes: [], failures: cart.map(it => ({ item: it, reason: String(e) })) };
   }
 
+  // eliminar éxitos del carrito local
+  if (Array.isArray(result.successes) && result.successes.length > 0) {
+    const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
+    for (let i = cart.length - 1; i >= 0; i--) {
+      const key = `${cart[i].sheetKey}::${cart[i].row}`;
+      if (successKeys.includes(key)) cart.splice(i, 1);
+    }
+    setCart(cart);
+    saveCart();
+    updateCartUI();
+    refreshAllCardDisplays();
+  }
+
+  const failures = result.failures || [];
   if (!failures.length) {
+    // todo ok: abrir WA con lo que se pagó (si hubo successes usamos successes, si no, usamos items)
+    const paidItems = result.successes.length ? result.successes.map(s => s.item) : (Array.isArray(cart) ? cart : []);
+    const msgItems = paidItems.length ? paidItems : (result.successes.length ? [] : (Array.isArray(cart) ? cart : []));
+    const message = buildMessageFromItems(msgItems.length ? msgItems : (result.successes.length ? msgItems : []));
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(decodeURIComponent(message))}`, "_blank");
-  } else {
-    const proceed = confirm("No fue posible actualizar el stock en el servidor para algunos productos. ¿Deseas enviar el pedido de todas maneras?");
-    if (!proceed) return;
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(decodeURIComponent(message))}`, "_blank");
+    // limpiar carrito si se pagó todo (ya eliminamos éxitos)
+    try { saveCart(); } catch(e){}
+    try { updateCartUI(); } catch(e){}
+    try { refreshAllCardDisplays(); } catch(e){}
+    if (!cart.length) try { closeCartPopup(); } catch(e){}
+    return;
   }
 
-  try { setCart([]); } catch (e) {}
-  try { saveCart(); } catch (e) {}
-  try { updateCartUI(); } catch (e) {}
+  // hay fallos parciales o totales
+  const paidCount = (result.successes || []).length;
+  const failedCount = failures.length;
+  if (paidCount > 0) {
+    const proceed = confirm(`Se reservaron ${paidCount} productos correctamente, pero fallaron ${failedCount}. ¿Deseas enviar por WhatsApp solo los reservados ahora?`);
+    if (proceed) {
+      const paidItems = result.successes.map(s => s.item);
+      const message = buildMessageFromItems(paidItems);
+      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(decodeURIComponent(message))}`, "_blank");
+      saveCart();
+      updateCartUI();
+      refreshAllCardDisplays();
+      if (!cart.length) try { closeCartPopup(); } catch(e){}
+      return;
+    } else {
+      // usuario canceló: sincronizamos y salimos
+      alert("Se sincronizará la página para mostrar stocks reales de los productos fallidos.");
+      refreshAllCardDisplays();
+      return;
+    }
+  }
+
+  // si no hubo éxitos
+  const proceedAll = confirm("No fue posible actualizar el stock en el servidor para algunos productos. ¿Deseas enviar el pedido de todas maneras?");
+  if (!proceedAll) {
+    refreshAllCardDisplays();
+    return;
+  }
+  // usuario acepta enviar aún con fallos: enviamos mensaje con el carrito completo (no eliminado)
+  const fallbackMessage = buildMessageFromItems(cart);
+  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(decodeURIComponent(fallbackMessage))}`, "_blank");
+  // no eliminamos nada en este caso (porque el server no confirmó)
+  saveCart();
+  updateCartUI();
+  refreshAllCardDisplays();
 }
 
