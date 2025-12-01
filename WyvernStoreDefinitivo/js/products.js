@@ -156,16 +156,18 @@ export function renderProducts(products, sheetKey) {
       </div>
     `;
 
-    // --- Imagen: implementación tomada del script nuevo ---
+    // --- Imagen: implementación igual al carousel.js ---
     const wrap = card.querySelector(".image-wrap");
     if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
-      // Usamos makeImgEl con eager = true para forzar carga inmediata (proxy si makeImgEl lo hace)
+      // Creamos la imagen forzando eager (makeImgEl debe aplicar proxy si está implementado allí)
       const imgEl = makeImgEl(imgUrl, name, "product-image", true);
+      imgEl.loading = "eager";
       imgEl.style.maxHeight = "320px";
       imgEl.style.width = "auto";
       wrap.innerHTML = "";
       wrap.appendChild(imgEl);
-      // El modal usa la URL original
+
+      // Modal con la URL original (igual que en carousel)
       imgEl.addEventListener("click", () => openImageModal(imgUrl, name));
     }
     // -------------------------------------------------------
