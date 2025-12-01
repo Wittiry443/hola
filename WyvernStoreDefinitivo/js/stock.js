@@ -19,24 +19,45 @@ export function mapToAvailableSheetKey(input) {
   return s || null;
 }
 
+async function safeParseJsonText(resp) {
+  const text = await resp.text().catch(() => null);
+  if (!text) return { text: null, json: null };
+  try {
+    return { text, json: JSON.parse(text) };
+  } catch (e) {
+    // not JSON
+    return { text, json: null };
+  }
+}
+
 export async function fetchServerStock(sheetKeyRaw, row) {
   const mapped = mapToAvailableSheetKey(sheetKeyRaw) || sheetKeyRaw;
   if (!mapped) return null;
 
-  const resp = await fetch(
-    API_URL + "?sheetKey=" + encodeURIComponent(mapped) + "&_=" + Date.now(),
-    { cache: "no-store" }
-  );
-  if (!resp.ok) return null;
-  const json = await resp.json().catch(() => null);
-  if (!json || !Array.isArray(json.products)) return null;
-
-  const found = json.products.find(p => String(p.row) === String(row));
-  if (!found) return null;
-  const data = found.data || {};
-  const stockVal =
-    firstKeyValue(data, ["stock", "cantidad", "Stock"]) || data.Stock || 0;
-  return Number(stockVal || 0);
+  try {
+    const resp = await fetch(
+      API_URL + "?sheetKey=" + encodeURIComponent(mapped) + "&_=" + Date.now(),
+      { cache: "no-store" }
+    );
+    if (!resp.ok) {
+      console.warn("fetchServerStock non-ok response", mapped, row, resp.status);
+      return null;
+    }
+    const { json } = await safeParseJsonText(resp);
+    if (!json || !Array.isArray(json.products)) {
+      console.warn("fetchServerStock invalid json shape", mapped, row, json);
+      return null;
+    }
+    const found = json.products.find(p => String(p.row) === String(row));
+    if (!found) return null;
+    const data = found.data || {};
+    const stockVal =
+      firstKeyValue(data, ["stock", "cantidad", "Stock"]) || data.Stock || 0;
+    return Number(stockVal || 0);
+  } catch (e) {
+    console.error("fetchServerStock exception", e, sheetKeyRaw, row);
+    return null;
+  }
 }
 
 export function applyNewStockToDOM(mappedKey, row, newStock, getReservedQtyCb) {
@@ -78,7 +99,8 @@ export async function updateStockOnServer_decrement(
   refreshCardStockDisplayCb
 ) {
   if (!qty || qty <= 0) return { ok: false };
-  const mapped = mapToAvailableSheetKey(sheetKeyRaw);
+  // allow fallback to raw key if map fails
+  const mapped = mapToAvailableSheetKey(sheetKeyRaw) || sheetKeyRaw;
   if (!mapped) return { ok: false };
 
   async function applyAndRefresh(newStock) {
@@ -98,23 +120,40 @@ export async function updateStockOnServer_decrement(
         qty: Number(qty)
       })
     });
-    const text = await resp.text().catch(() => null);
-    let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch (e) {
-      json = null;
-    }
 
-    if (resp.ok && json && !json.error && json.newStock !== undefined) {
-      await applyAndRefresh(Number(json.newStock));
-      return { ok: true, newStock: Number(json.newStock) };
+    const { text, json } = await safeParseJsonText(resp);
+
+    if (!resp.ok) {
+      console.warn("decrement single non-ok", mapped, row, qty, resp.status, text);
+    } else {
+      // robust detection of returned stock
+      if (json && !json.error) {
+        const newStock =
+          json.newStock ?? json.new_stock ?? json.stock ?? json.quantity ?? null;
+        if (newStock !== null && newStock !== undefined) {
+          await applyAndRefresh(Number(newStock));
+          return { ok: true, newStock: Number(newStock) };
+        }
+        // if json ok but no stock field, still consider ok if worker signals success (optional)
+        if (json.ok === true || json.success === true) {
+          // try to refresh from server to get definitive stock
+          const srv = await fetchServerStock(mapped, row);
+          if (srv !== null) {
+            await applyAndRefresh(Number(srv));
+            return { ok: true, newStock: Number(srv) };
+          }
+          return { ok: true, newStock: null };
+        }
+      } else {
+        console.warn("decrement single unexpected json", mapped, row, qty, json);
+      }
     }
   } catch (e) {
-    // fallback
+    console.error("updateStockOnServer_decrement error (single)", e, mapped, row, qty);
+    // fallback will attempt per-unit
   }
 
-  // fallback: varias requests individuales
+  // fallback: parallel singles (one request per qty)
   const promises = [];
   for (let i = 0; i < qty; i++) {
     promises.push(
@@ -128,16 +167,10 @@ export async function updateStockOnServer_decrement(
         })
       })
         .then(async r => {
-          const t = await r.text().catch(() => null);
-          let j = null;
-          try {
-            j = t ? JSON.parse(t) : null;
-          } catch (e) {
-            j = null;
-          }
-          return { ok: r.ok, json: j };
+          const { text, json } = await safeParseJsonText(r);
+          return { ok: r.ok, json, status: r.status, text };
         })
-        .catch(() => ({ ok: false }))
+        .catch(err => ({ ok: false, error: String(err) }))
     );
   }
 
@@ -148,9 +181,9 @@ export async function updateStockOnServer_decrement(
   for (const res of results) {
     if (res && res.ok && res.json && !res.json.error) {
       successCount++;
-      if (res.json.newStock !== undefined) {
-        lastNewStock = Number(res.json.newStock);
-      }
+      const candidate =
+        res.json.newStock ?? res.json.new_stock ?? res.json.stock ?? res.json.quantity ?? undefined;
+      if (candidate !== undefined) lastNewStock = Number(candidate);
     }
   }
 
@@ -159,6 +192,9 @@ export async function updateStockOnServer_decrement(
   } else if (successCount > 0) {
     const server = await fetchServerStock(mapped, row);
     if (server !== null) await applyAndRefresh(Number(server));
+  } else {
+    // nothing succeeded: attempt to log for debugging
+    console.warn("updateStockOnServer_decrement: no successful responses", mapped, row, qty, results.slice(0,5));
   }
 
   return { ok: successCount === qty, newStock: lastNewStock };
@@ -177,16 +213,18 @@ export async function updateStockOnServer_set(sheetKeyRaw, row, newStock) {
         value: String(newStock)
       })
     });
-    const text = await resp.text().catch(() => null);
-    let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch (e) {
-      json = null;
+    const { text, json } = await safeParseJsonText(resp);
+    if (!resp.ok) {
+      console.warn("updateStockOnServer_set non-ok", mapped, row, resp.status, text);
+      return false;
     }
-    if (resp.ok && json && !json.error) {
+    if (json && !json.error) {
       return true;
     }
-  } catch (e) {}
+    // if no json but 200, still return true (best-effort)
+    return resp.ok;
+  } catch (e) {
+    console.error("updateStockOnServer_set exception", e, sheetKeyRaw, row, newStock);
+  }
   return false;
 }
