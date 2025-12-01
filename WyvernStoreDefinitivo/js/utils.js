@@ -69,28 +69,48 @@ export function observeLazyImages(rootEl) {
   });
 }
 
+function isAlreadyProxied(url) {
+  if (!url) return false;
+  try {
+    const su = String(url);
+    // Si ya apunta al proxy del worker o contiene image-proxy?url= evitamos proxificar
+    return su.startsWith(API_URL) || su.indexOf('image-proxy?url=') !== -1;
+  } catch (e) { return false; }
+}
+
 export function makeImgEl(url, alt, cls, eager = false) {
-  const img = document.createElement("img");
-  img.alt = alt || "";
-  img.className = cls || "";
-  img.loading = eager ? "eager" : "lazy";
+  const img = document.createElement('img');
+  img.alt = alt || '';
+  img.className = cls || '';
+  img.loading = eager ? 'eager' : 'lazy';
 
   try {
-    const proxied = url
-      ? API_URL + "image-proxy?url=" + encodeURIComponent(url)
-      : "";
+    let finalUrl = url || '';
+    if (finalUrl) {
+      // Solo proxificamos si no está ya proxificado
+      if (!isAlreadyProxied(finalUrl)) {
+        finalUrl = API_URL + 'image-proxy?url=' + encodeURIComponent(finalUrl);
+      }
+    }
+
     if (eager) {
-      img.src = proxied;
+      img.src = finalUrl;
     } else {
-      img.dataset.src = proxied;
+      img.dataset.src = finalUrl;
       img.src =
-        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+        'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
     }
   } catch (e) {
-    img.src = "";
+    // fallback: usar la url original sin proxificar
+    img.src = url || '';
   }
 
-  img.style.objectFit = "contain";
-  img.onerror = () => img.remove();
+  img.style.objectFit = 'contain';
+  // No elimines la imagen en error — ocultamos y dejamos que el caller muestre placeholder
+  img.addEventListener('error', () => {
+    img.style.display = 'none';
+    img.removeAttribute('data-src');
+  });
+
   return img;
 }
