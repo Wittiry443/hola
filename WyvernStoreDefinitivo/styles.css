@@ -1273,3 +1273,64 @@ footer p {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
 }
+.admin-table td:last-child,
+.admin-table th:last-child {
+  width: 180px; /* espacio para el select y el botón */
+  white-space: nowrap;
+}
+
+.table-wrapper {
+  overflow-x: visible !important; /* evita que tape los controles */
+}
+/* ===========================================
+   FIX: Evitar scroll horizontal y permitir usar
+   botones / selects en columna Acciones
+   =========================================== */
+.table-wrapper {
+  overflow-x: visible !important; /* permite mostrar select + botones */
+}
+
+/* ===========================================
+   Columna ACCIONES más ancha y estable
+   =========================================== */
+.admin-table td:last-child,
+.admin-table th:last-child {
+  width: 180px;       /* espacio adecuado para select + eliminar */
+  white-space: nowrap;
+}
+
+/* ===========================================
+   La tabla ya no se “rompe” por textos largos
+   =========================================== */
+.admin-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.admin-table td {
+  word-wrap: break-word;
+}
+
+/* ===========================================
+   Estilos del select de estado
+   =========================================== */
+.order-status-select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #fff;
+  border: 1px solid #334155;
+  cursor: pointer;
+}
+
+/* ===========================================
+   Botón de eliminar dentro de la tabla
+   =========================================== */
+.order-delete-btn {
+  margin-left: 8px;
+  background: #dc2626 !important;
+  color: white !important;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+}
