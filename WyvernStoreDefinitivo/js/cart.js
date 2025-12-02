@@ -23,6 +23,13 @@ import {
 // 🔥 IMPORTAMOS AUTH + HELPER PARA GUARDAR PEDIDOS EN FIREBASE
 import { auth, createOrderInDB } from "./firebase.js";
 
+/* ------------------------------------------------------------------
+   DEBUG: logs iniciales para saber que el módulo se cargó
+------------------------------------------------------------------ */
+console.log('%c[cart.js] LOADED', 'background:#223; color:#bada55; padding:2px 6px');
+window.__WYVERN_CART_DEBUG = (window.__WYVERN_CART_DEBUG || 0) + 1;
+console.log('[cart.js] debug counter:', window.__WYVERN_CART_DEBUG);
+
 const cartIconBtn = document.getElementById("cart-icon-btn");
 const cartPopupOverlay = document.getElementById("cart-popup-overlay");
 const cartPopup = document.getElementById("cart-popup");
@@ -287,7 +294,58 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
 }
 
 // ======================================
-// 🧾 HELPER: CREAR PEDIDO EN FIREBASE (AHORA CON createOrderInDB => {ok,key,error})
+// PENDING ORDER: guardado local + retry al cargar
+// ======================================
+
+function _savePendingOrderLocally(obj) {
+  try {
+    localStorage.setItem('wyvern_pending_order', JSON.stringify(obj));
+    console.log('[orders] pending order saved to localStorage');
+  } catch (e) {
+    console.error('[orders] failed saving pending order locally:', e);
+  }
+}
+
+async function _retryPendingOrderIfAny() {
+  try {
+    const raw = localStorage.getItem('wyvern_pending_order');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    console.log('[orders] found pending order in localStorage, retrying...', parsed);
+    const res = await createOrderFromItems(parsed.items);
+    if (res && res.ok) {
+      console.log('[orders] pending order created successfully on retry:', res.firebaseKey);
+      if (parsed.paymentMeta && typeof window._markOrderAsPaid === 'function') {
+        try {
+          await window._markOrderAsPaid(res.firebaseKey, parsed.paymentMeta);
+        } catch (e) {
+          console.warn('[orders] markOrderAsPaid failed on retry (non-fatal):', e);
+        }
+      }
+      localStorage.removeItem('wyvern_pending_order');
+      return res;
+    } else {
+      console.warn('[orders] retry still failed:', res && res.error);
+      return null;
+    }
+  } catch (err) {
+    console.error('[orders] retryPendingOrderIfAny exception:', err);
+    return null;
+  }
+}
+
+// retry al cargar la app (no bloqueante)
+window.addEventListener('load', () => {
+  (async () => {
+    try {
+      await _retryPendingOrderIfAny();
+    } catch (e) {}
+  })();
+});
+
+// ======================================
+// 🧾 HELPER: CREAR PEDIDO EN FIREBASE
+//    Compatible con createOrderInDB que devuelve string key
 // ======================================
 
 async function createOrderFromItems(items) {
@@ -333,17 +391,33 @@ async function createOrderFromItems(items) {
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
   try {
-    const res = await createOrderInDB(order); // createOrderInDB devuelve { ok, key, error }
-    if (!res) {
+    const res = await createOrderInDB(order);
+    // createOrderInDB puede devolver:
+    // - una string con la key (firebaseKey)
+    // - o un objeto { ok, key, error } en otras implementaciones
+    if (res === null || res === undefined) {
       console.error("[orders] createOrderInDB returned null/undefined");
       return { ok: false, firebaseKey: null, error: "no_response_from_createOrderInDB", order };
     }
-    if (!res.ok) {
-      console.error("[orders] createOrderInDB reported failure:", res.error);
-      return { ok: false, firebaseKey: null, error: res.error || "create_failed", order };
+
+    if (typeof res === "string") {
+      console.log("[orders] order saved ok, firebaseKey:", res);
+      return { ok: true, firebaseKey: res, error: null, order };
     }
-    console.log("[orders] order saved ok, firebaseKey:", res.key);
-    return { ok: true, firebaseKey: res.key, error: null, order };
+
+    if (typeof res === "object") {
+      if (res.ok) {
+        console.log("[orders] order saved ok (obj), firebaseKey:", res.key);
+        return { ok: true, firebaseKey: res.key, error: null, order };
+      } else {
+        console.error("[orders] createOrderInDB reported failure (obj):", res.error);
+        return { ok: false, firebaseKey: null, error: res.error || "create_failed", order };
+      }
+    }
+
+    // fallback
+    console.warn("[orders] createOrderInDB returned unexpected type:", typeof res, res);
+    return { ok: false, firebaseKey: null, error: "unexpected_return_type", order };
   } catch (err) {
     console.error("[orders] createOrderFromItems EXCEPTION:", err);
     return { ok: false, firebaseKey: null, error: String(err), order };
@@ -507,11 +581,14 @@ export async function sendToWhatsApp() {
       const createRes = await createOrderFromItems(paidItems);
       if (!createRes || !createRes.ok) {
         console.warn("[orders] createOrderFromItems failed (WA):", createRes && createRes.error);
+        // guardar pendiente por si acaso
+        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
       } else {
         console.log("[orders] WA order created:", createRes.firebaseKey);
       }
     } catch (e) {
       console.error("Error guardando pedido en Firebase (WA):", e);
+      _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
       // no rompemos el flujo de WhatsApp por esto
     }
 
@@ -555,11 +632,13 @@ export async function sendToWhatsApp() {
       const createRes = await createOrderFromItems(paidItems);
       if (!createRes || !createRes.ok) {
         console.warn("[orders] createOrderFromItems failed (WA partial):", createRes && createRes.error);
+        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
       } else {
         console.log("[orders] WA partial order created:", createRes.firebaseKey);
       }
     } catch (e) {
       console.error("Error guardando pedido parcial en Firebase (WA):", e);
+      _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
     }
 
     let message = "🛒 *Pedido desde WyvernStore* (parcial)\n\n";
@@ -640,7 +719,7 @@ window._openCardPaymentModal = async function() {
       return;
     }
 
-    // 4) Intentar crear pedido en Firebase AHORA (pendiente)
+    // 4) Intentar crear pedido en Firebase AHORA (pendiente) - intenta y si falla guardar pending
     try {
       console.log("[checkout] creating firebase order (pendiente) for paidItems:", paidItems);
       const createResNow = await createOrderFromItems(paidItems);
@@ -649,10 +728,12 @@ window._openCardPaymentModal = async function() {
         console.log("[checkout] firebase order created (pending) key:", firebaseKey);
       } else {
         console.warn("[checkout] createOrderFromItems (pending) failed:", createResNow && createResNow.error);
+        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
       }
     } catch (err) {
       console.error("[checkout] createOrderFromItems failed (pending):", err);
-      // continuamos al pago aunque falle la creación: si sucede, la fallback creare después del pago
+      _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
+      // continuamos al pago aunque falle la creación: fallback después del pago intentará crear de nuevo
     }
 
     // 5) Abrir la pasarela de pago — reemplaza openYourPaymentModal por tu integración real
@@ -683,25 +764,34 @@ window._openCardPaymentModal = async function() {
           if (createResAfter && createResAfter.ok) {
             firebaseKey = createResAfter.firebaseKey;
             console.log("[checkout] firebase order created after payment:", firebaseKey);
+            // si había pending guardado, lo removemos
+            localStorage.removeItem('wyvern_pending_order');
           } else {
             console.warn("[checkout] createOrderFromItems AFTER payment failed:", createResAfter && createResAfter.error);
+            // guardamos pending con paymentMeta para retry
+            _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now() });
           }
         } catch (err) {
           console.error("[checkout] createOrderFromItems AFTER payment EXCEPTION:", err);
+          _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now() });
           // Aquí podrías notificar al usuario / enviar la info a soporte
         }
-      }
-
-      // 7) Marcar pedido como pagado si tienes implementación para ello
-      try {
-        if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
-          await window._markOrderAsPaid(firebaseKey, paymentMeta);
+      } else {
+        // marcar pedido como pagado si existe firebaseKey
+        try {
+          if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
+            await window._markOrderAsPaid(firebaseKey, paymentMeta);
+          }
+          // si teníamos pending guardado, quitarlo
+          localStorage.removeItem('wyvern_pending_order');
+        } catch (err) {
+          console.warn("[checkout] markOrderAsPaid failed (non-fatal):", err);
+          // guardar pending por si se necesita confirmar el pago/estado
+          _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now(), firebaseKey });
         }
-      } catch (err) {
-        console.warn("[checkout] markOrderAsPaid failed (non-fatal):", err);
       }
 
-      // 8) eliminar del carrito los items pagados (igual que en WA)
+      // 7) eliminar del carrito los items pagados (igual que en WA)
       if (Array.isArray(result.successes) && result.successes.length > 0) {
         const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
         for (let i = cart.length - 1; i >= 0; i--) {
@@ -732,6 +822,19 @@ window._openCardPaymentModal = async function() {
 window._onCardPaymentSuccess = async function(paymentMeta = {}) {
   console.log("Pago OK:", paymentMeta);
   // Si tu gateway notifica el éxito desde otro contexto, puedes procesarlo aquí.
+  // Ejemplo: intentar crear el pedido si quedó pendiente
+  try {
+    const pendingRaw = localStorage.getItem('wyvern_pending_order');
+    if (pendingRaw) {
+      const pending = JSON.parse(pendingRaw);
+      // attach paymentMeta then retry
+      pending.paymentMeta = paymentMeta;
+      localStorage.setItem('wyvern_pending_order', JSON.stringify(pending));
+      await _retryPendingOrderIfAny();
+    }
+  } catch (e) {
+    console.warn('[checkout] _onCardPaymentSuccess handling failed:', e);
+  }
 };
 
 // OPTIONAL: marcar orden como pagada en Firebase (implementa según tu esquema DB)
@@ -739,17 +842,41 @@ window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
   // Implementa actualización en tu DB: set estado='pagado', guardar transactionId, paidAt, paymentMeta...
   // Ejemplo (pseudocódigo, sustituye por la función real que actualice tu order):
   // await updateOrderInDB(firebaseKey, { estado: 'pagado', transactionId: paymentMeta.transactionId, paidAt: new Date().toISOString(), paymentMeta });
+  console.log('[orders] markOrderAsPaid (placeholder) for', firebaseKey, paymentMeta);
   return true;
 };
 
 // -----------------------------
-// PLACEHOLDER: implementar tu gateway real aquí
+// PLACEHOLDER: implementar tu gateway real aquí (reemplaza esto)
 // -----------------------------
 async function openYourPaymentModal(paymentPayload) {
   // EJEMPLO SIMULADO (para pruebas locales) — reemplaza por integración real:
   // return new Promise(resolve => setTimeout(() => resolve({ success: true, transactionId: 'tx123' }), 1000));
   throw new Error("Implementa openYourPaymentModal(paymentPayload) con tu gateway.");
 }
+
+// ======================================
+// DEBUG: helpers expuestos para consola
+// ======================================
+window.__wyvern_createOrderFromItems = async (items) => {
+  console.log('[DEBUG] manual createOrderFromItems called with', items);
+  try {
+    const res = await createOrderFromItems(items);
+    console.log('[DEBUG] createOrderFromItems result:', res);
+    return res;
+  } catch (e) {
+    console.error('[DEBUG] createOrderFromItems exception:', e);
+    throw e;
+  }
+};
+
+window.__wyvern_retryPending = async () => {
+  const r = await _retryPendingOrderIfAny();
+  console.log('[DEBUG] retryPending ->', r);
+  return r;
+};
+
+console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_retryPending available');
 
 // ======================================
 // EXPONER FUNCIONES AL ÁMBITO GLOBAL
