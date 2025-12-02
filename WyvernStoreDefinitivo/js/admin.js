@@ -1,11 +1,11 @@
 //-----------------------------------------------------------
-//  WyvernStore Admin Panel + DASHBOARD de ventas y domicilios
+//  WyvernStore Admin Panel + DASHBOARD de pedidos (Firebase)
 //-----------------------------------------------------------
 
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
-import { fmtPrice, firstKeyValue, escapeHtml } from "./utils.js";
+import { fmtPrice, escapeHtml } from "./utils.js";
 import {
   ref,
   onValue
@@ -16,8 +16,6 @@ import {
 //-----------------------------------------------------------
 let allProducts = [];
 let filteredProducts = [];
-let sampleOrders = []; // ya no lo usamos, pero lo dejo por si luego simulan algo
-
 
 //-----------------------------------------------------------
 // Seguridad: acceso solo para admins
@@ -34,7 +32,6 @@ onAuthStateChanged(auth, (user) => {
   label.textContent = user.email;
   initAdminUI();
 });
-
 
 //-----------------------------------------------------------
 // UI Inicial
@@ -53,19 +50,20 @@ function initAdminUI() {
   document.getElementById("product-category-filter").onchange = applyProductFilters;
 
   loadProducts();
-  generarDashboard();      // 🟢 Ahora genera el dashboard desde Firebase
+  generarDashboardPedidos(); // 🟢 lee /orders de Firebase y llena la tabla de pedidos
 }
 
-
-
 //-----------------------------------------------------------
-// 📦 DASHBOARD DE VENTAS & DOMICILIOS (Datos reales de Firebase)
+// 📦 DASHBOARD DE PEDIDOS (Firebase Realtime Database)
 //-----------------------------------------------------------
-function generarDashboard() {
-  const tbody = document.querySelector("#tablaDomicilios tbody");
+function generarDashboardPedidos() {
+  const tbody = document.getElementById("orders-table-body");
   if (!tbody) return;
 
-  // Mensaje inicial
+  const ventasDiaEl = document.getElementById("ventasDia");
+  const ventasMesEl = document.getElementById("ventasMes");
+  const pedidosEl   = document.getElementById("pedidosCount");
+
   tbody.innerHTML = `
     <tr>
       <td colspan="5" style="text-align:center;color:#999">
@@ -74,26 +72,22 @@ function generarDashboard() {
     </tr>
   `;
 
-  const ventasDiaEl  = document.getElementById("ventasDia");
-  const ventasMesEl  = document.getElementById("ventasMes");
-  const pedidosEl    = document.getElementById("pedidosCount");
-
-  const today   = new Date();
-  const yToday  = today.getFullYear();
-  const mToday  = today.getMonth();
-  const dToday  = today.getDate();
+  const today  = new Date();
+  const year   = today.getFullYear();
+  const month  = today.getMonth();
+  const day    = today.getDate();
 
   const ordersRef = ref(db, "orders");
 
-  // Escucha en tiempo real los cambios en /orders
   onValue(ordersRef, (snapshot) => {
     const data = snapshot.val() || {};
     const entries = Object.entries(data);
 
-    tbody.innerHTML = "";
     let totalDia = 0;
     let totalMes = 0;
     let totalPedidos = 0;
+
+    tbody.innerHTML = "";
 
     if (!entries.length) {
       tbody.innerHTML = `
@@ -109,6 +103,7 @@ function generarDashboard() {
 
         const total = Number(order.total || 0);
 
+        // Fecha
         let created = null;
         try {
           if (order.createdAt) created = new Date(order.createdAt);
@@ -121,22 +116,20 @@ function generarDashboard() {
           const m = created.getMonth();
           const d = created.getDate();
 
-          if (y === yToday && m === mToday) {
+          if (y === year && m === month) {
             totalMes += total;
-            if (d === dToday) totalDia += total;
+            if (d === day) totalDia += total;
           }
         } else {
-          // Si no hay fecha válida, lo contamos en el mes actual por simplicidad
+          // si no hay fecha válida, lo metemos al mes actual por simplicidad
           totalMes += total;
         }
-
-        const estadoRaw   = (order.estado || "pendiente").toString();
-        const estadoClass = estadoRaw.replace(/\s+/g, "-").toLowerCase();
-        const estadoLabel = estadoRaw;
 
         const idPedido = order.idPedido || key;
         const cliente  = order.cliente || "Sin cliente";
         const resumen  = order.resumen || "Sin resumen";
+        const estado   = (order.estado || "pendiente").toString();
+        const estadoClass = estado.replace(/\s+/g, "-").toLowerCase();
 
         tbody.innerHTML += `
           <tr>
@@ -144,15 +137,15 @@ function generarDashboard() {
             <td>${escapeHtml(String(cliente))}</td>
             <td>${escapeHtml(String(resumen))}</td>
             <td>$${Number(total || 0).toLocaleString()}</td>
-            <td><span class="estado ${estadoClass}">${escapeHtml(estadoLabel)}</span></td>
+            <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
           </tr>
         `;
       });
     }
 
-    if (ventasDiaEl) ventasDiaEl.innerText = totalDia.toLocaleString();
-    if (ventasMesEl) ventasMesEl.innerText = totalMes.toLocaleString();
-    if (pedidosEl)   pedidosEl.innerText   = totalPedidos;
+    if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
+    if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
+    if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
   }, (error) => {
     console.error("Error leyendo orders:", error);
     tbody.innerHTML = `
@@ -164,8 +157,6 @@ function generarDashboard() {
     `;
   });
 }
-
-
 
 //-----------------------------------------------------------
 // Cargar productos desde Sheets
@@ -187,14 +178,11 @@ async function loadProducts() {
     filteredProducts = [...allProducts];
     fillProductCategoryFilter();
     renderProductsTable();
-
   } catch (err) {
     console.error(err);
     tbody.innerHTML = `<tr><td colspan="6" style="color:#f55;text-align:center;">Error cargando productos</td></tr>`;
   }
 }
-
-
 
 //-----------------------------------------------------------
 // Filtros + Tabla de productos
@@ -213,7 +201,7 @@ function applyProductFilters() {
 
   filteredProducts = allProducts.filter(p => {
     const name = (p.data.Nombre || "").toLowerCase();
-    return name.includes(term) && (!cat || p.sheetKey===cat);
+    return name.includes(term) && (!cat || p.sheetKey === cat);
   });
 
   renderProductsTable();
@@ -226,9 +214,9 @@ function renderProductsTable() {
     return tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">Sin resultados</td></tr>`;
 
   tbody.innerHTML = "";
-  filteredProducts.forEach(p=>{
-    const d=p.data;
-    tbody.innerHTML+=`
+  filteredProducts.forEach(p => {
+    const d = p.data;
+    tbody.innerHTML += `
       <tr>
         <td>${p.row}</td>
         <td>${p.sheetKey}</td>
@@ -239,100 +227,112 @@ function renderProductsTable() {
           <button class="btn-ghost btn-small" data-edit="${p.sheetKey}::${p.row}">Editar</button>
           <button class="btn-small" style="background:#E53935;color:#fff" data-del="${p.sheetKey}::${p.row}">Eliminar</button>
         </td>
-      </tr>`
+      </tr>`;
   });
 
-  tbody.querySelectorAll("[data-edit]").forEach(b=>{
-    const[s,r]=b.dataset.edit.split("::");
-    b.onclick=()=>openEditProductModal(allProducts.find(p=>p.row==r && p.sheetKey==s));
+  tbody.querySelectorAll("[data-edit]").forEach(b => {
+    const [s, r] = b.dataset.edit.split("::");
+    b.onclick = () => openEditProductModal(allProducts.find(p => p.row == r && p.sheetKey == s));
   });
 
-  tbody.querySelectorAll("[data-del]").forEach(b=>{
-    const[s,r]=b.dataset.del.split("::");
-    b.onclick=()=>deleteProduct(allProducts.find(p=>p.row==r && p.sheetKey==s));
+  tbody.querySelectorAll("[data-del]").forEach(b => {
+    const [s, r] = b.dataset.del.split("::");
+    b.onclick = () => deleteProduct(allProducts.find(p => p.row == r && p.sheetKey == s));
   });
 }
-
-
 
 //-----------------------------------------------------------
 // CREAR / EDITAR PRODUCTO
 //-----------------------------------------------------------
-function openCreateProductModal(){
-  document.getElementById("product-modal-title").textContent="Nuevo producto";
+function openCreateProductModal() {
+  document.getElementById("product-modal-title").textContent = "Nuevo producto";
   clearForm();
   showModal();
 }
 
-function openEditProductModal(prod){
-  const d=prod.data;
-  document.getElementById("product-modal-title").textContent="Editar producto";
+function openEditProductModal(prod) {
+  const d = prod.data;
+  document.getElementById("product-modal-title").textContent = "Editar producto";
 
-  document.getElementById("product-row").value=prod.row;
-  document.getElementById("product-sheetKey").value=prod.sheetKey;
-  document.getElementById("product-name").value=d.Nombre;
-  document.getElementById("product-price").value=d.Precio;
-  document.getElementById("product-stock").value=d.Stock;
-  document.getElementById("product-img").value=d.Img||"";
-  document.getElementById("product-description").value=d.Descripcion||"";
+  document.getElementById("product-row").value = prod.row;
+  document.getElementById("product-sheetKey").value = prod.sheetKey;
+  document.getElementById("product-name").value = d.Nombre;
+  document.getElementById("product-price").value = d.Precio;
+  document.getElementById("product-stock").value = d.Stock;
+  document.getElementById("product-img").value = d.Img || "";
+  document.getElementById("product-description").value = d.Descripcion || "";
 
   showModal();
 }
 
-function showModal(){document.getElementById("product-modal-overlay").style.display="flex";}
-function closeProductModal(){document.getElementById("product-modal-overlay").style.display="none";}
-function clearForm(){document.querySelector("#product-form").reset();}
-
-
+function showModal() {
+  document.getElementById("product-modal-overlay").style.display = "flex";
+}
+function closeProductModal() {
+  document.getElementById("product-modal-overlay").style.display = "none";
+}
+function clearForm() {
+  document.querySelector("#product-form").reset();
+}
 
 //-----------------------------------------------------------
 // GUARDAR en Sheets (ADD / UPDATE)
 //-----------------------------------------------------------
-async function onSubmitProductForm(e){
+async function onSubmitProductForm(e) {
   e.preventDefault();
 
-  const row=document.getElementById("product-row").value.trim();
-  const isUpdate=!!row;
+  const row = document.getElementById("product-row").value.trim();
+  const isUpdate = !!row;
 
-  const payload={
-    action:isUpdate?"update":"add",
-    row:isUpdate?Number(row):"",
-    sheetKey:document.getElementById("product-sheetKey").value.trim(),
-    name:document.getElementById("product-name").value.trim(),
-    price:Number(document.getElementById("product-price").value.trim()),
-    stock:Number(document.getElementById("product-stock").value.trim()),
-    img:document.getElementById("product-img").value.trim(),
-    description:document.getElementById("product-description").value.trim()
+  const payload = {
+    action: isUpdate ? "update" : "add",
+    row: isUpdate ? Number(row) : "",
+    sheetKey: document.getElementById("product-sheetKey").value.trim(),
+    name: document.getElementById("product-name").value.trim(),
+    price: Number(document.getElementById("product-price").value.trim()),
+    stock: Number(document.getElementById("product-stock").value.trim()),
+    img: document.getElementById("product-img").value.trim(),
+    description: document.getElementById("product-description").value.trim()
   };
 
-  const res = await fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  const r=await res.json();
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const r = await res.json();
 
-  if(r.ok){ alert("✔ Guardado correctamente"); loadProducts(); closeProductModal(); }
-  else alert("❌ Error al guardar: "+JSON.stringify(r));
+  if (r.ok) {
+    alert("✔ Guardado correctamente");
+    loadProducts();
+    closeProductModal();
+  } else {
+    alert("❌ Error al guardar: " + JSON.stringify(r));
+  }
 }
-
-
 
 //-----------------------------------------------------------
 // ELIMINAR
 //-----------------------------------------------------------
-async function deleteProduct(prod){
-  if(!confirm("¿Eliminar producto permanentemente?")) return;
+async function deleteProduct(prod) {
+  if (!confirm("¿Eliminar producto permanentemente?")) return;
 
-  const res = await fetch(API_URL,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"delete",sheetKey:prod.sheetKey,row:Number(prod.row)})
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete", sheetKey: prod.sheetKey, row: Number(prod.row) })
   });
 
-  const r=await res.json();
-  if(r.ok){alert("🗑 Producto eliminado");loadProducts();}
-  else alert("Error al borrar:\n"+JSON.stringify(r));
+  const r = await res.json();
+  if (r.ok) {
+    alert("🗑 Producto eliminado");
+    loadProducts();
+  } else {
+    alert("Error al borrar:\n" + JSON.stringify(r));
+  }
 }
-
-
 
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+// Hola esto es una prueba

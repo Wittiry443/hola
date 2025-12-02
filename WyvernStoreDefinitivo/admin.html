@@ -63,7 +63,7 @@
                 </tr>
               </thead>
               <tbody id="product-table-body">
-                <!-- filas dinámicas -->
+                <!-- filas dinámicas de productos -->
               </tbody>
             </table>
           </div>
@@ -77,11 +77,23 @@
         </div>
 
         <div class="admin-card-body">
+          <!-- Stats de pedidos / ventas -->
+          <div class="admin-stats-row">
+            <div class="stat-pill">
+              Ventas hoy: $<span id="ventasDia">0</span>
+            </div>
+            <div class="stat-pill">
+              Ventas este mes: $<span id="ventasMes">0</span>
+            </div>
+            <div class="stat-pill">
+              Pedidos: <span id="pedidosCount">0</span>
+            </div>
+          </div>
+
           <p class="admin-hint">
-            
-            <code>loadOrdersFromBackend</code> y
-            <code>updateOrderStatusInBackend</code> que están en
-            <strong>admin.js</strong>.
+            Los pedidos se cargan automáticamente desde
+            <strong>Firebase Realtime Database</strong> (nodo
+            <code>/orders</code>) cuando un usuario realiza una compra desde la tienda.
           </p>
 
           <div class="table-wrapper">
@@ -96,7 +108,7 @@
                 </tr>
               </thead>
               <tbody id="orders-table-body">
-                <!-- filas dinámicas -->
+                <!-- filas dinámicas de pedidos -->
               </tbody>
             </table>
           </div>
