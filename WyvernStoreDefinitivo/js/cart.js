@@ -348,7 +348,12 @@ window.addEventListener('load', () => {
 //    Compatible con createOrderInDB que devuelve string key
 // ======================================
 
-async function createOrderFromItems(items) {
+// ------------------ en js/cart.js ------------------
+/** 
+ * Exportada para que otros módulos (modals.js) puedan crear la orden.
+ * Devuelve { ok: boolean, firebaseKey: string|null, error: string|null, order }
+ */
+export async function createOrderFromItems(items) {
   if (!items || !items.length) return { ok: false, firebaseKey: null, error: "empty_items" };
 
   // total
@@ -361,12 +366,10 @@ async function createOrderFromItems(items) {
     0
   );
 
-  // resumen corto: "2 x Espada | 1 x Escudo"
   const resumen = items
     .map(i => `${i.qty} x ${i.name}`)
     .join(" | ");
 
-  // cliente desde Firebase Auth (si hay), si no, Invitado
   const user = auth?.currentUser || null;
   const cliente = user?.email || user?.uid || "Invitado";
 
@@ -391,33 +394,14 @@ async function createOrderFromItems(items) {
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
   try {
-    const res = await createOrderInDB(order);
-    // createOrderInDB puede devolver:
-    // - una string con la key (firebaseKey)
-    // - o un objeto { ok, key, error } en otras implementaciones
-    if (res === null || res === undefined) {
-      console.error("[orders] createOrderInDB returned null/undefined");
-      return { ok: false, firebaseKey: null, error: "no_response_from_createOrderInDB", order };
+    // createOrderInDB devuelve la key (string) en tu firebase.js
+    const key = await createOrderInDB(order);
+    if (!key) {
+      console.error("[orders] createOrderInDB returned falsy key:", key);
+      return { ok: false, firebaseKey: null, error: "no_key_returned", order };
     }
-
-    if (typeof res === "string") {
-      console.log("[orders] order saved ok, firebaseKey:", res);
-      return { ok: true, firebaseKey: res, error: null, order };
-    }
-
-    if (typeof res === "object") {
-      if (res.ok) {
-        console.log("[orders] order saved ok (obj), firebaseKey:", res.key);
-        return { ok: true, firebaseKey: res.key, error: null, order };
-      } else {
-        console.error("[orders] createOrderInDB reported failure (obj):", res.error);
-        return { ok: false, firebaseKey: null, error: res.error || "create_failed", order };
-      }
-    }
-
-    // fallback
-    console.warn("[orders] createOrderInDB returned unexpected type:", typeof res, res);
-    return { ok: false, firebaseKey: null, error: "unexpected_return_type", order };
+    console.log("[orders] order saved ok, firebaseKey:", key);
+    return { ok: true, firebaseKey: key, error: null, order };
   } catch (err) {
     console.error("[orders] createOrderFromItems EXCEPTION:", err);
     return { ok: false, firebaseKey: null, error: String(err), order };
@@ -884,3 +868,4 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
+
