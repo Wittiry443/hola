@@ -25,8 +25,8 @@ const firebaseConfig = {
   messagingSenderId: "81806961108",
   appId: "1:81806961108:web:8ae2d5b1980244d5220e41",
   measurementId: "G-CKFZSD52SY",
-  // ⚠️ Opcional pero recomendado si usan Realtime Database:
-  // databaseURL: "PEGAS_AQUÍ_LA_URL_DE_LA_RTDB_DESDE_LA_CONSOLA",
+  // IMPORTANT: si usas Realtime Database, añade aquí la URL desde la consola:
+  // databaseURL: "https://<tu-proyecto>.firebaseio.com",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -45,25 +45,21 @@ export const db = getDatabase(app);
 
 /**
  * Guarda un pedido en /orders en la Realtime Database.
- * Devuelve la key generada para el pedido.
- *
- * Estructura esperada del "order" que le manda cart.js:
- * {
- *   idPedido: string,
- *   cliente: string,
- *   resumen: string,
- *   total: number,
- *   estado: "pendiente" | "pagado" | lo que definan,
- *   createdAt: ISOString,
- *   items: [
- *     { nombre, cantidad, precioUnitario },
- *     ...
- *   ]
- * }
+ * Devuelve un objeto { ok: boolean, key: string|null, error: string|null }
  */
 export async function createOrderInDB(order) {
-  const ordersRef = ref(db, "orders");
-  const newRef = push(ordersRef);  // genera una key única
-  await set(newRef, order);
-  return newRef.key;               // esta será tu "id real" en la DB (para el dashboard)
+  try {
+    console.log("[firebase] createOrderInDB -> saving order", order);
+
+    const ordersRef = ref(db, "orders");
+    const newRef = push(ordersRef);  // genera una key única
+    await set(newRef, order);
+
+    console.log("[firebase] createOrderInDB -> saved, key:", newRef.key);
+    return { ok: true, key: newRef.key, error: null };
+  } catch (err) {
+    console.error("[firebase] createOrderInDB ERROR:", err);
+    // Devolvemos el error en forma segura para que el cliente lo loguee/decida qué hacer
+    return { ok: false, key: null, error: String(err) };
+  }
 }
