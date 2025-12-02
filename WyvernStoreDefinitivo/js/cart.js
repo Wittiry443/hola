@@ -556,10 +556,11 @@ export async function sendToWhatsApp() {
 }
 
 // ======================================
-// PAGO CON TARJETA: flujo igual que WA
+// PAGO CON TARJETA: flujo robusto (reemplaza la versión anterior)
 // ======================================
 
 window._openCardPaymentModal = async function() {
+  console.log("[checkout] starting card checkout flow");
   const items = getCartItems();
   if (!items || items.length === 0) {
     alert("Tu carrito está vacío 🛒");
@@ -569,13 +570,18 @@ window._openCardPaymentModal = async function() {
   const payBtn = document.getElementById("cart-paycard");
   if (payBtn) { payBtn.disabled = true; payBtn.innerText = "Procesando..."; }
 
+  // Variable que guardará la clave del pedido en Firebase (si se creó)
+  let firebaseKey = null;
+
   try {
-    // 1) reservar/decrementar stock (igual que en WA)
+    // 1) intentar reservar/decrementar stock (igual que en WA)
+    console.log("[checkout] calling finalizePurchaseOnServer", { items });
     let result = { successes: [], failures: [] };
     try {
       result = await finalizePurchaseOnServer(items, lastProductsCache);
+      console.log("[checkout] finalizePurchaseOnServer result:", result);
     } catch (err) {
-      console.error("Error al finalizar compra antes de pago:", err);
+      console.error("[checkout] finalizePurchaseOnServer threw:", err);
       alert("No se pudo reservar el stock. Intenta de nuevo.");
       return;
     }
@@ -585,6 +591,7 @@ window._openCardPaymentModal = async function() {
 
     // 2) Si hay fallos: preguntar al usuario (igual que WA)
     if (failures.length) {
+      console.warn("[checkout] some items failed to reserve:", failures);
       const proceed = confirm(
         `No fue posible actualizar el stock en el servidor para ${failures.length} productos. ¿Deseas continuar solo con los productos que sí se reservaron?`
       );
@@ -603,48 +610,63 @@ window._openCardPaymentModal = async function() {
 
     // 3) Si no hay items reservados -> nada que pagar
     if (!paidItems.length) {
+      console.log("[checkout] no paidItems after finalize -> nothing to pay");
       alert("No hay items reservados para pagar.");
       return;
     }
 
-    // 4) Crear pedido en Firebase (estado "pendiente") — igual que en WA
-    let firebaseKey = null;
+    // 4) Intentar crear pedido en Firebase AHORA (pendiente)
     try {
+      console.log("[checkout] creating firebase order (pendiente) for paidItems:", paidItems);
       firebaseKey = await createOrderFromItems(paidItems);
+      console.log("[checkout] firebase order created (pending) key:", firebaseKey);
     } catch (err) {
-      console.error("Error guardando pedido en Firebase (pendiente):", err);
-      // opcional: abortar si es crítico
-      // alert("No se pudo crear el pedido. Intenta de nuevo."); return;
+      console.error("[checkout] createOrderFromItems failed (pending):", err);
+      // continuamos al pago aunque falle la creación: si sucede, la fallback creare después del pago
     }
 
-    // 5) Abrir la pasarela de pago — <--- IMPLEMENTA esta función según tu proveedor
-    // Debe devolver un objeto tipo { success: true, transactionId: "...", ... }
+    // 5) Abrir la pasarela de pago — reemplaza openYourPaymentModal por tu integración real
     const total = updateCartUI();
     let paymentMeta = null;
     try {
+      console.log("[checkout] opening payment modal", { total, paidItems, firebaseKey });
       paymentMeta = await openYourPaymentModal({
         amount: total,
         items: paidItems,
         orderKey: firebaseKey
       });
+      console.log("[checkout] payment modal result:", paymentMeta);
     } catch (err) {
-      console.error("Error en la pasarela de pago:", err);
+      console.error("[checkout] openYourPaymentModal threw:", err);
       alert("Error al abrir la pasarela de pago.");
       return;
     }
 
-    // 6) Manejar resultado del pago
+    // 6) Si pago OK -> asegurarse de que exista el pedido en Firebase (si no se creó antes)
     if (paymentMeta && paymentMeta.success) {
-      // Opcional: marcar el pedido como pagado en Firebase si implementas la función
-      try {
-        if (typeof window._markOrderAsPaid === "function") {
-          await window._markOrderAsPaid(firebaseKey, paymentMeta);
+      console.log("[checkout] payment success:", paymentMeta);
+
+      if (!firebaseKey) {
+        try {
+          console.log("[checkout] firebaseKey faltante -> crear pedido después del pago");
+          firebaseKey = await createOrderFromItems(paidItems);
+          console.log("[checkout] firebase order created after payment:", firebaseKey);
+        } catch (err) {
+          console.error("[checkout] createOrderFromItems AFTER payment failed:", err);
+          // Aquí podrías notificar al usuario / enviar la info a soporte
         }
-      } catch (e) {
-        console.warn("No se pudo marcar pedido como pagado (opcional):", e);
       }
 
-      // Eliminar del carrito los items pagados (igual que en WA)
+      // 7) Marcar pedido como pagado si tienes implementación para ello
+      try {
+        if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
+          await window._markOrderAsPaid(firebaseKey, paymentMeta);
+        }
+      } catch (err) {
+        console.warn("[checkout] markOrderAsPaid failed (non-fatal):", err);
+      }
+
+      // 8) eliminar del carrito los items pagados (igual que en WA)
       if (Array.isArray(result.successes) && result.successes.length > 0) {
         const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
         for (let i = cart.length - 1; i >= 0; i--) {
@@ -662,8 +684,8 @@ window._openCardPaymentModal = async function() {
       alert("Pago procesado correctamente. ¡Gracias por tu compra!");
       return;
     } else {
-      // Pago fallido o cancelado: avisar y mantener carrito (los decrementos ya se hicieron; decide si revertir)
-      alert("Pago cancelado o fallido. Si ya te descontamos stock por favor contacta soporte.");
+      console.warn("[checkout] payment not successful or cancelled:", paymentMeta);
+      alert("Pago cancelado o fallido. Si ya se reservaron unidades contáctanos para soporte.");
       return;
     }
   } finally {
