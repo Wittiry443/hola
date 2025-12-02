@@ -186,6 +186,8 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
   setCart(cart);
   refreshCardStockDisplay(sheetKey, row, cache);
   updateCartUI();
+  // Nota: NO decretemos en servidor al añadir al carrito para evitar doble decremento.
+  // La actualización definitiva se realiza en finalizePurchaseOnServer (pagos/whatsapp).
 }
 
 // ======================================
@@ -551,6 +553,145 @@ export async function sendToWhatsApp() {
   try { updateCartUI(); } catch(e){}
   try { refreshAllCardDisplays(); } catch(e){}
   if (cart.length === 0) try { closeCartPopup(); } catch(e){}
+}
+
+// ======================================
+// PAGO CON TARJETA: flujo igual que WA
+// ======================================
+
+window._openCardPaymentModal = async function() {
+  const items = getCartItems();
+  if (!items || items.length === 0) {
+    alert("Tu carrito está vacío 🛒");
+    return;
+  }
+
+  const payBtn = document.getElementById("cart-paycard");
+  if (payBtn) { payBtn.disabled = true; payBtn.innerText = "Procesando..."; }
+
+  try {
+    // 1) reservar/decrementar stock (igual que en WA)
+    let result = { successes: [], failures: [] };
+    try {
+      result = await finalizePurchaseOnServer(items, lastProductsCache);
+    } catch (err) {
+      console.error("Error al finalizar compra antes de pago:", err);
+      alert("No se pudo reservar el stock. Intenta de nuevo.");
+      return;
+    }
+
+    const failures = result.failures || [];
+    const paidItems = result.successes.length ? result.successes.map(s => s.item) : [];
+
+    // 2) Si hay fallos: preguntar al usuario (igual que WA)
+    if (failures.length) {
+      const proceed = confirm(
+        `No fue posible actualizar el stock en el servidor para ${failures.length} productos. ¿Deseas continuar solo con los productos que sí se reservaron?`
+      );
+      if (!proceed) {
+        // sincronizamos stocks fallidos en UI y abortamos
+        await Promise.all(failures.map(f => {
+          const mapped = mapToAvailableSheetKey(f.item.sheetKey) || f.item.sheetKey;
+          return fetchServerStock(mapped, f.item.row).then(s => {
+            if (s !== null) applyNewStockToDOM(mapped, f.item.row, Number(s), getReservedQty);
+          }).catch(()=>{});
+        }));
+        refreshAllCardDisplays();
+        return;
+      }
+    }
+
+    // 3) Si no hay items reservados -> nada que pagar
+    if (!paidItems.length) {
+      alert("No hay items reservados para pagar.");
+      return;
+    }
+
+    // 4) Crear pedido en Firebase (estado "pendiente") — igual que en WA
+    let firebaseKey = null;
+    try {
+      firebaseKey = await createOrderFromItems(paidItems);
+    } catch (err) {
+      console.error("Error guardando pedido en Firebase (pendiente):", err);
+      // opcional: abortar si es crítico
+      // alert("No se pudo crear el pedido. Intenta de nuevo."); return;
+    }
+
+    // 5) Abrir la pasarela de pago — <--- IMPLEMENTA esta función según tu proveedor
+    // Debe devolver un objeto tipo { success: true, transactionId: "...", ... }
+    const total = updateCartUI();
+    let paymentMeta = null;
+    try {
+      paymentMeta = await openYourPaymentModal({
+        amount: total,
+        items: paidItems,
+        orderKey: firebaseKey
+      });
+    } catch (err) {
+      console.error("Error en la pasarela de pago:", err);
+      alert("Error al abrir la pasarela de pago.");
+      return;
+    }
+
+    // 6) Manejar resultado del pago
+    if (paymentMeta && paymentMeta.success) {
+      // Opcional: marcar el pedido como pagado en Firebase si implementas la función
+      try {
+        if (typeof window._markOrderAsPaid === "function") {
+          await window._markOrderAsPaid(firebaseKey, paymentMeta);
+        }
+      } catch (e) {
+        console.warn("No se pudo marcar pedido como pagado (opcional):", e);
+      }
+
+      // Eliminar del carrito los items pagados (igual que en WA)
+      if (Array.isArray(result.successes) && result.successes.length > 0) {
+        const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
+        for (let i = cart.length - 1; i >= 0; i--) {
+          const key = `${cart[i].sheetKey}::${cart[i].row}`;
+          if (successKeys.includes(key)) cart.splice(i, 1);
+        }
+        setCart(cart);
+      }
+
+      try { await saveCart(); } catch (_) {}
+      try { updateCartUI(); } catch (_) {}
+      try { refreshAllCardDisplays(); } catch (_) {}
+      try { closeCartPopup(); } catch (_) {}
+
+      alert("Pago procesado correctamente. ¡Gracias por tu compra!");
+      return;
+    } else {
+      // Pago fallido o cancelado: avisar y mantener carrito (los decrementos ya se hicieron; decide si revertir)
+      alert("Pago cancelado o fallido. Si ya te descontamos stock por favor contacta soporte.");
+      return;
+    }
+  } finally {
+    if (payBtn) { payBtn.disabled = false; payBtn.innerText = "Pagar con tarjeta"; }
+  }
+};
+
+// OPTIONAL: helper que tu pasarela puede llamar si necesita notificar desde otro contexto
+window._onCardPaymentSuccess = async function(paymentMeta = {}) {
+  console.log("Pago OK:", paymentMeta);
+  // Si tu gateway notifica el éxito desde otro contexto, puedes procesarlo aquí.
+};
+
+// OPTIONAL: marcar orden como pagada en Firebase (implementa según tu esquema DB)
+window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
+  // Implementa actualización en tu DB: set estado='pagado', guardar transactionId, paidAt, paymentMeta...
+  // Ejemplo (pseudocódigo, sustituye por la función real que actualice tu order):
+  // await updateOrderInDB(firebaseKey, { estado: 'pagado', transactionId: paymentMeta.transactionId, paidAt: new Date().toISOString(), paymentMeta });
+  return true;
+};
+
+// -----------------------------
+// PLACEHOLDER: implementar tu gateway real aquí
+// -----------------------------
+async function openYourPaymentModal(paymentPayload) {
+  // EJEMPLO SIMULADO (para pruebas locales) — reemplaza por integración real:
+  // return new Promise(resolve => setTimeout(() => resolve({ success: true, transactionId: 'tx123' }), 1000));
+  throw new Error("Implementa openYourPaymentModal(paymentPayload) con tu gateway.");
 }
 
 // ======================================
