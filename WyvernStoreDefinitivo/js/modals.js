@@ -6,7 +6,6 @@ import {
   refreshAllCardDisplays,
   updateCartUI,
   closeCartPopup,
-  createOrderFromItems
 } from "./cart.js";
 import { WHATSAPP_NUMBER, API_URL } from "./config.js";
 
@@ -406,40 +405,30 @@ document.addEventListener("click", async (e) => {
     if (failures.length === 0) {
       // --- AQUI: crear orden en Firebase, marcarla como pagada ---
       try {
-        // --------------------------------------------------
-// Después de haber calculado `result` y `result.successes`
-// --------------------------------------------------
+        const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
+        if (paidItems && paidItems.length) {
+          const createRes = await createOrderAndPersist(paidItems, true);
+          if (createRes && createRes.ok) {
+            console.log("[orders] card payment order created:", createRes.firebaseKey);
+            // opcional: exponer para UI / analytics
+            window._lastFirebaseOrderKey = createRes.firebaseKey;
+          } else {
+            console.warn("[orders] failed to create order after card payment:", createRes && createRes.error);
+          }
+        }
+      } catch (err) {
+        console.error("[orders] exception creating order after card payment:", err);
+      }
 
-// obtener items que se pagaron realmente (éxitos)
-const paidItems = (result.successes && result.successes.length) 
-  ? result.successes.map(s => s.item) 
-  : items; // fallback
-
-// Intentar crear la orden en Firebase (pendiente / antes de cerrar modales)
-try {
-  console.log('[modals] intentando crear orden en Firebase (card) con paidItems:', paidItems);
-  const createRes = await createOrderFromItems(paidItems);
-  if (createRes && createRes.ok) {
-    console.log('[modals] orden creada OK en Firebase (card):', createRes.firebaseKey);
-    // Guardar key en window/localStorage por si necesitas marcarla como pagada desde otra notificación
-    window._lastFirebaseOrderKey = createRes.firebaseKey;
-    try { localStorage.setItem('wyvern_pending_order', createRes.firebaseKey); } catch(e) {}
-  } else {
-    console.warn('[modals] createOrderFromItems devolvió error (card):', createRes && createRes.error);
-  }
-} catch (err) {
-  console.error('[modals] fallo creando orden en Firebase (card):', err);
-}
-
-// Ahora sí: confirmar al usuario y limpiar UI (igual que antes)
-alert("Pago confirmado. Gracias por tu compra.");
-// limpiar pendientes y cerrar UI
-window._pendingPayment = null;
-if (otpOverlay) otpOverlay.style.display = "none";
-if (cardOverlay) cardOverlay.style.display = "none";
-document.body.style.overflow = "";
-try { closeCartPopup(); } catch (e) {}
-return;
+      alert("Pago confirmado. Gracias por tu compra.");
+      // limpiar pendientes y cerrar UI
+      window._pendingPayment = null;
+      if (otpOverlay) otpOverlay.style.display = "none";
+      if (cardOverlay) cardOverlay.style.display = "none";
+      document.body.style.overflow = "";
+      try { closeCartPopup(); } catch (e) {}
+      return;
+    }
 
     // Hay fallos (parciales o totales)
     // Si hubo éxitos parciales, preguntar si se desea enviar pedido de los éxitos por WA
@@ -608,4 +597,3 @@ export async function sendToWhatsApp(lastProductsCache) {
   updateCartUI();
   refreshAllCardDisplays();
 }
-
