@@ -8,8 +8,19 @@ import { API_URL } from "./config.js";
 import { fmtPrice, escapeHtml } from "./utils.js";
 import {
   ref,
-  onValue
+  onValue,
+  update,
+  remove
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+// Estados disponibles para el select
+const ORDER_STATUSES = [
+  "pendiente",
+  "en proceso",
+  "enviado",
+  "entregado",
+  "cancelado"
+];
 
 //-----------------------------------------------------------
 // Estado interno
@@ -50,7 +61,7 @@ function initAdminUI() {
   document.getElementById("product-category-filter").onchange = applyProductFilters;
 
   loadProducts();
-  generarDashboardPedidos(); // 🟢 lee /orders de Firebase y llena la tabla de pedidos
+  generarDashboardPedidos(); // lee /orders y arma la tabla de pedidos
 }
 
 //-----------------------------------------------------------
@@ -66,7 +77,7 @@ function generarDashboardPedidos() {
 
   tbody.innerHTML = `
     <tr>
-      <td colspan="5" style="text-align:center;color:#999">
+      <td colspan="6" style="text-align:center;color:#999">
         Cargando pedidos desde Firebase...
       </td>
     </tr>
@@ -92,7 +103,7 @@ function generarDashboardPedidos() {
     if (!entries.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="5" style="text-align:center;color:#aaa">
+          <td colspan="6" style="text-align:center;color:#aaa">
             No hay pedidos registrados todavía.
           </td>
         </tr>
@@ -111,25 +122,38 @@ function generarDashboardPedidos() {
           created = null;
         }
 
+        const estado   = (order.estado || "pendiente").toString();
+        const estadoLower = estado.toLowerCase();
+
+        // Solo contamos en las ventas si no está cancelado
         if (created && !isNaN(created.getTime())) {
           const y = created.getFullYear();
           const m = created.getMonth();
           const d = created.getDate();
 
-          if (y === year && m === month) {
-            totalMes += total;
-            if (d === day) totalDia += total;
+          if (estadoLower !== "cancelado") {
+            if (y === year && m === month) {
+              totalMes += total;
+              if (d === day) totalDia += total;
+            }
           }
         } else {
-          // si no hay fecha válida, lo metemos al mes actual por simplicidad
-          totalMes += total;
+          if (estadoLower !== "cancelado") {
+            totalMes += total;
+          }
         }
 
         const idPedido = order.idPedido || key;
         const cliente  = order.cliente || "Sin cliente";
         const resumen  = order.resumen || "Sin resumen";
-        const estado   = (order.estado || "pendiente").toString();
-        const estadoClass = estado.replace(/\s+/g, "-").toLowerCase();
+        const estadoClass = estadoLower.replace(/\s+/g, "-");
+
+        // Opciones de estado para el select
+        const optionsHtml = ORDER_STATUSES.map(st => `
+          <option value="${st}" ${st === estadoLower ? "selected" : ""}>
+            ${st}
+          </option>
+        `).join("");
 
         tbody.innerHTML += `
           <tr>
@@ -137,7 +161,23 @@ function generarDashboardPedidos() {
             <td>${escapeHtml(String(cliente))}</td>
             <td>${escapeHtml(String(resumen))}</td>
             <td>$${Number(total || 0).toLocaleString()}</td>
-            <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
+            <td>
+              <span class="estado ${estadoClass}">
+                ${escapeHtml(estado)}
+              </span>
+            </td>
+            <td>
+              <select class="order-status-select" data-order-key="${key}">
+                ${optionsHtml}
+              </select>
+              <button
+                class="btn-small btn-ghost order-delete-btn"
+                data-order-key="${key}"
+                title="Eliminar pedido"
+              >
+                🗑
+              </button>
+            </td>
           </tr>
         `;
       });
@@ -146,16 +186,56 @@ function generarDashboardPedidos() {
     if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
     if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
     if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
+
+    // Listeners para los selects de estado
+    tbody.querySelectorAll(".order-status-select").forEach(sel => {
+      sel.onchange = async () => {
+        const key = sel.dataset.orderKey;
+        const newStatus = sel.value;
+        try {
+          await updateOrderStatus(key, newStatus);
+        } catch (e) {
+          console.error("Error actualizando estado:", e);
+          alert("No se pudo actualizar el estado. Revisa la consola.");
+        }
+      };
+    });
+
+    // Listeners para los botones de eliminar
+    tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const key = btn.dataset.orderKey;
+        if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
+        try {
+          await deleteOrder(key);
+        } catch (e) {
+          console.error("Error eliminando pedido:", e);
+          alert("No se pudo eliminar el pedido. Revisa la consola.");
+        }
+      };
+    });
   }, (error) => {
     console.error("Error leyendo orders:", error);
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" style="text-align:center;color:#f55">
+        <td colspan="6" style="text-align:center;color:#f55">
           Error cargando pedidos desde Firebase.
         </td>
       </tr>
     `;
   });
+}
+
+// Actualizar estado en Firebase
+async function updateOrderStatus(orderKey, newStatus) {
+  const orderRef = ref(db, `orders/${orderKey}`);
+  await update(orderRef, { estado: newStatus });
+}
+
+// Eliminar pedido en Firebase
+async function deleteOrder(orderKey) {
+  const orderRef = ref(db, `orders/${orderKey}`);
+  await remove(orderRef);
 }
 
 //-----------------------------------------------------------
@@ -312,7 +392,7 @@ async function onSubmitProductForm(e) {
 }
 
 //-----------------------------------------------------------
-// ELIMINAR
+// ELIMINAR PRODUCTO
 //-----------------------------------------------------------
 async function deleteProduct(prod) {
   if (!confirm("¿Eliminar producto permanentemente?")) return;
@@ -335,4 +415,3 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
-// Hola esto es una prueba
