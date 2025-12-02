@@ -184,15 +184,6 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
   setCart(cart);
   refreshCardStockDisplay(sheetKey, row, cache);
   updateCartUI();
-
-  // intento de decremento en servidor (no bloqueante)
-  updateStockOnServer_decrement(
-    sheetKey,
-    row,
-    qty,
-    getReservedQty,
-    (sk, r) => refreshCardStockDisplay(sk, r, cache)
-  ).catch(() => {});
 }
 
 // ======================================
@@ -518,3 +509,4 @@ export async function sendToWhatsApp() {
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
+
