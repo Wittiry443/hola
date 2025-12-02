@@ -287,11 +287,11 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
 }
 
 // ======================================
-// 🧾 HELPER: CREAR PEDIDO EN FIREBASE
+// 🧾 HELPER: CREAR PEDIDO EN FIREBASE (AHORA CON createOrderInDB => {ok,key,error})
 // ======================================
 
 async function createOrderFromItems(items) {
-  if (!items || !items.length) return null;
+  if (!items || !items.length) return { ok: false, firebaseKey: null, error: "empty_items" };
 
   // total
   const total = items.reduce(
@@ -330,9 +330,24 @@ async function createOrderFromItems(items) {
     })),
   };
 
-  // guardar en /orders
-  const firebaseKey = await createOrderInDB(order);
-  return firebaseKey;
+  console.log("[orders] createOrderFromItems -> creating order:", order);
+
+  try {
+    const res = await createOrderInDB(order); // createOrderInDB devuelve { ok, key, error }
+    if (!res) {
+      console.error("[orders] createOrderInDB returned null/undefined");
+      return { ok: false, firebaseKey: null, error: "no_response_from_createOrderInDB", order };
+    }
+    if (!res.ok) {
+      console.error("[orders] createOrderInDB reported failure:", res.error);
+      return { ok: false, firebaseKey: null, error: res.error || "create_failed", order };
+    }
+    console.log("[orders] order saved ok, firebaseKey:", res.key);
+    return { ok: true, firebaseKey: res.key, error: null, order };
+  } catch (err) {
+    console.error("[orders] createOrderFromItems EXCEPTION:", err);
+    return { ok: false, firebaseKey: null, error: String(err), order };
+  }
 }
 
 // ======================================
@@ -489,9 +504,14 @@ export async function sendToWhatsApp() {
   // ✅ CASO 1: todo OK, sin fallos
   if (!failures.length) {
     try {
-      await createOrderFromItems(paidItems); // guardamos pedido en Firebase
+      const createRes = await createOrderFromItems(paidItems);
+      if (!createRes || !createRes.ok) {
+        console.warn("[orders] createOrderFromItems failed (WA):", createRes && createRes.error);
+      } else {
+        console.log("[orders] WA order created:", createRes.firebaseKey);
+      }
     } catch (e) {
-      console.error("Error guardando pedido en Firebase:", e);
+      console.error("Error guardando pedido en Firebase (WA):", e);
       // no rompemos el flujo de WhatsApp por esto
     }
 
@@ -532,9 +552,14 @@ export async function sendToWhatsApp() {
   // Usuario acepta enviar pedido parcial: guardamos pedido solo con los items pagados
   if (paidItems.length) {
     try {
-      await createOrderFromItems(paidItems);
+      const createRes = await createOrderFromItems(paidItems);
+      if (!createRes || !createRes.ok) {
+        console.warn("[orders] createOrderFromItems failed (WA partial):", createRes && createRes.error);
+      } else {
+        console.log("[orders] WA partial order created:", createRes.firebaseKey);
+      }
     } catch (e) {
-      console.error("Error guardando pedido parcial en Firebase:", e);
+      console.error("Error guardando pedido parcial en Firebase (WA):", e);
     }
 
     let message = "🛒 *Pedido desde WyvernStore* (parcial)\n\n";
@@ -618,8 +643,13 @@ window._openCardPaymentModal = async function() {
     // 4) Intentar crear pedido en Firebase AHORA (pendiente)
     try {
       console.log("[checkout] creating firebase order (pendiente) for paidItems:", paidItems);
-      firebaseKey = await createOrderFromItems(paidItems);
-      console.log("[checkout] firebase order created (pending) key:", firebaseKey);
+      const createResNow = await createOrderFromItems(paidItems);
+      if (createResNow && createResNow.ok) {
+        firebaseKey = createResNow.firebaseKey;
+        console.log("[checkout] firebase order created (pending) key:", firebaseKey);
+      } else {
+        console.warn("[checkout] createOrderFromItems (pending) failed:", createResNow && createResNow.error);
+      }
     } catch (err) {
       console.error("[checkout] createOrderFromItems failed (pending):", err);
       // continuamos al pago aunque falle la creación: si sucede, la fallback creare después del pago
@@ -649,10 +679,15 @@ window._openCardPaymentModal = async function() {
       if (!firebaseKey) {
         try {
           console.log("[checkout] firebaseKey faltante -> crear pedido después del pago");
-          firebaseKey = await createOrderFromItems(paidItems);
-          console.log("[checkout] firebase order created after payment:", firebaseKey);
+          const createResAfter = await createOrderFromItems(paidItems);
+          if (createResAfter && createResAfter.ok) {
+            firebaseKey = createResAfter.firebaseKey;
+            console.log("[checkout] firebase order created after payment:", firebaseKey);
+          } else {
+            console.warn("[checkout] createOrderFromItems AFTER payment failed:", createResAfter && createResAfter.error);
+          }
         } catch (err) {
-          console.error("[checkout] createOrderFromItems AFTER payment failed:", err);
+          console.error("[checkout] createOrderFromItems AFTER payment EXCEPTION:", err);
           // Aquí podrías notificar al usuario / enviar la info a soporte
         }
       }
