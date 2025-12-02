@@ -9,6 +9,9 @@ import {
 } from "./cart.js";
 import { WHATSAPP_NUMBER, API_URL } from "./config.js";
 
+// 🔥 importar auth + helper para guardar pedidos
+import { auth, createOrderInDB } from "./firebase.js";
+
 /* -------------------------
    Elementos del DOM (pueden ser null si el script corre antes del DOM)
    ------------------------- */
@@ -259,6 +262,54 @@ export function closeCardPaymentModal() {
 }
 
 /* -------------------------
+   Helper: crear orden en Firebase a partir de items
+   Devuelve { ok, firebaseKey, error, order }
+   ------------------------- */
+async function createOrderAndPersist(items, markPaid = false) {
+  if (!items || !items.length) return { ok: false, firebaseKey: null, error: "empty_items" };
+
+  const total = items.reduce((s, p) => s + parsePriceNumber(p._priceNum !== undefined ? p._priceNum : p.price) * Number(p.qty || 0), 0);
+  const resumen = items.map(i => `${i.qty} x ${i.name}`).join(" | ");
+  const user = auth?.currentUser || null;
+  const cliente = user?.email || user?.uid || "Invitado";
+  const idPedido = Date.now().toString();
+
+  const order = {
+    idPedido,
+    cliente,
+    resumen,
+    total,
+    estado: markPaid ? "pagado" : "pendiente",
+    createdAt: new Date().toISOString(),
+    items: items.map(i => ({
+      nombre: i.name,
+      cantidad: Number(i.qty || 0),
+      precioUnitario: parsePriceNumber(i._priceNum !== undefined ? i._priceNum : i.price),
+    })),
+  };
+
+  console.log("[orders] createOrderAndPersist -> creating order", { order, markPaid });
+  try {
+    const res = await createOrderInDB(order); // puede devolver key string o un objeto, adaptamos
+    let key = null;
+    if (!res) {
+      console.warn("[orders] createOrderInDB returned falsy:", res);
+      return { ok: false, firebaseKey: null, error: "no_response_from_createOrderInDB", order };
+    }
+    if (typeof res === "string") key = res;
+    else if (res.key) key = res.key;
+    else key = res; // fallback (whatever it is)
+    console.log("[orders] createOrderInDB returned key:", key);
+    // exponer para debugging
+    window._lastFirebaseOrderKey = key;
+    return { ok: true, firebaseKey: key, error: null, order };
+  } catch (err) {
+    console.error("[orders] createOrderAndPersist EXCEPTION:", err);
+    return { ok: false, firebaseKey: null, error: String(err), order };
+  }
+}
+
+/* -------------------------
    Document-level listeners (pagar / OTP / enviar WhatsApp)
    ------------------------- */
 document.addEventListener("click", (e) => {
@@ -352,6 +403,23 @@ document.addEventListener("click", async (e) => {
     // Manejo final según fallos
     const failures = result.failures || [];
     if (failures.length === 0) {
+      // --- AQUI: crear orden en Firebase, marcarla como pagada ---
+      try {
+        const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
+        if (paidItems && paidItems.length) {
+          const createRes = await createOrderAndPersist(paidItems, true);
+          if (createRes && createRes.ok) {
+            console.log("[orders] card payment order created:", createRes.firebaseKey);
+            // opcional: exponer para UI / analytics
+            window._lastFirebaseOrderKey = createRes.firebaseKey;
+          } else {
+            console.warn("[orders] failed to create order after card payment:", createRes && createRes.error);
+          }
+        }
+      } catch (err) {
+        console.error("[orders] exception creating order after card payment:", err);
+      }
+
       alert("Pago confirmado. Gracias por tu compra.");
       // limpiar pendientes y cerrar UI
       window._pendingPayment = null;
@@ -371,6 +439,20 @@ document.addEventListener("click", async (e) => {
       if (proceed) {
         // armar mensaje solo con los items pagados (successes)
         const paidItems = result.successes.map(s => s.item);
+
+        // --- crear orden en Firebase solo con los paidItems (marcada pagada) ---
+        try {
+          const createRes = await createOrderAndPersist(paidItems, true);
+          if (createRes && createRes.ok) {
+            console.log("[orders] partial card payment order created:", createRes.firebaseKey);
+            window._lastFirebaseOrderKey = createRes.firebaseKey;
+          } else {
+            console.warn("[orders] createOrder failed for partial paidItems:", createRes && createRes.error);
+          }
+        } catch (err) {
+          console.error("[orders] exception creating partial order after card payment:", err);
+        }
+
         let message = "*Pedido (parcial) - WyvernStore*%0A%0A";
         let total = 0;
         paidItems.forEach(p => {
@@ -515,4 +597,3 @@ export async function sendToWhatsApp(lastProductsCache) {
   updateCartUI();
   refreshAllCardDisplays();
 }
-
