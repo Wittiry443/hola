@@ -156,30 +156,33 @@ function generarDashboardPedidos() {
         `).join("");
 
         tbody.innerHTML += `
-          <tr>
-            <td>${escapeHtml(String(idPedido))}</td>
-            <td>${escapeHtml(String(cliente))}</td>
-            <td>${escapeHtml(String(resumen))}</td>
-            <td>$${Number(total || 0).toLocaleString()}</td>
-            <td>
-              <span class="estado ${estadoClass}">
-                ${escapeHtml(estado)}
-              </span>
-            </td>
-            <td>
-              <select class="order-status-select" data-order-key="${key}">
-                ${optionsHtml}
-              </select>
-              <button
-                class="btn-small btn-ghost order-delete-btn"
-                data-order-key="${key}"
-                title="Eliminar pedido"
-              >
-                🗑
-              </button>
-            </td>
-          </tr>
-        `;
+  <tr>
+    <td>${escapeHtml(String(idPedido))}</td>
+    <td>${escapeHtml(String(cliente))}</td>
+    <td>${escapeHtml(String(resumen))}</td>
+    <td>$${Number(total || 0).toLocaleString()}</td>
+    <td>
+      <span class="estado ${estadoClass}">
+        ${escapeHtml(estado)}
+      </span>
+    </td>
+    <td>
+      <div class="order-actions">
+        <select class="order-status-select" data-order-key="${key}">
+          ${optionsHtml}
+        </select>
+        <button
+          class="order-delete-btn"
+          data-order-key="${key}"
+          title="Eliminar pedido"
+        >
+          🗑
+        </button>
+      </div>
+    </td>
+  </tr>
+`;
+
       });
     }
 

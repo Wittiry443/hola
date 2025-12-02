@@ -1273,15 +1273,6 @@ footer p {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
 }
-.admin-table td:last-child,
-.admin-table th:last-child {
-  width: 180px; /* espacio para el select y el botón */
-  white-space: nowrap;
-}
-
-.table-wrapper {
-  overflow-x: visible !important; /* evita que tape los controles */
-}
 /* ===========================================
    FIX: Evitar scroll horizontal y permitir usar
    botones / selects en columna Acciones
@@ -1333,4 +1324,109 @@ footer p {
   border-radius: 6px;
   padding: 2px 6px;
   font-size: 0.8rem;
+}
+/* ===========================
+   PEDIDOS: columna Estado / Acciones
+   =========================== */
+
+/* La tabla no se rompe y las columnas se ven coherentes */
+.admin-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.admin-table td {
+  word-wrap: break-word;
+}
+
+/* Columna ACCIONES alineada y compacta */
+.admin-table td:last-child,
+.admin-table th:last-child {
+  width: 190px;
+  white-space: nowrap;
+}
+
+.order-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Pill de estado bonito */
+.estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Colores por estado */
+.estado.pendiente {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border-color: #eab308;
+}
+
+.estado.en-proceso {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: #3b82f6;
+}
+
+
+.estado.enviado {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border-color: #38bdf8;
+}
+
+.estado.entregado {
+  background: rgba(34, 197, 94, 0.15);
+  color: #bbf7d0;
+  border-color: #22c55e;
+}
+
+.estado.cancelado {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fecaca;
+  border-color: #ef4444;
+}
+
+/* Select compacto */
+.order-status-select {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #020617;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  font-size: 0.75rem;
+  min-width: 110px;
+  cursor: pointer;
+}
+
+/* Botón de borrar más discreto */
+.order-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: transparent;
+  color: #fecaca;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.order-delete-btn:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+  transform: translateY(-1px);
 }
