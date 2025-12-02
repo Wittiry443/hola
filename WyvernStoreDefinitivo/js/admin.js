@@ -2,17 +2,21 @@
 //  WyvernStore Admin Panel + DASHBOARD de ventas y domicilios
 //-----------------------------------------------------------
 
-import { auth, onAuthStateChanged } from "./firebase.js";
+import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
 import { fmtPrice, firstKeyValue, escapeHtml } from "./utils.js";
+import {
+  ref,
+  onValue
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 //-----------------------------------------------------------
 // Estado interno
 //-----------------------------------------------------------
 let allProducts = [];
 let filteredProducts = [];
-let sampleOrders = [];
+let sampleOrders = []; // ya no lo usamos, pero lo dejo por si luego simulan algo
 
 
 //-----------------------------------------------------------
@@ -49,46 +53,116 @@ function initAdminUI() {
   document.getElementById("product-category-filter").onchange = applyProductFilters;
 
   loadProducts();
-  generarDashboard();      // 🟢 Se genera el dashboard al entrar
+  generarDashboard();      // 🟢 Ahora genera el dashboard desde Firebase
 }
 
 
 
 //-----------------------------------------------------------
-// 📦 DASHBOARD DE VENTAS & DOMICILIOS (Simulación visual realista)
+// 📦 DASHBOARD DE VENTAS & DOMICILIOS (Datos reales de Firebase)
 //-----------------------------------------------------------
 function generarDashboard() {
-  const clientes=["Juan","Ana","Carlos","Laura","Pedro","Sofía","Valentina","Esteban","Miguel","Camila"];
-  const ciudades=["Bogotá","Medellín","Cali","Cartagena","Barranquilla","Bucaramanga","Manizales","Armenia"];
-  const estados=["en-proceso","pagado","entregado"];
+  const tbody = document.querySelector("#tablaDomicilios tbody");
+  if (!tbody) return;
 
-  const tbody=document.querySelector("#tablaDomicilios tbody");
+  // Mensaje inicial
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="5" style="text-align:center;color:#999">
+        Cargando pedidos desde Firebase...
+      </td>
+    </tr>
+  `;
 
-  let totalDia=0,totalMes=0,totalPedidos=16;
+  const ventasDiaEl  = document.getElementById("ventasDia");
+  const ventasMesEl  = document.getElementById("ventasMes");
+  const pedidosEl    = document.getElementById("pedidosCount");
 
-  for(let i=1;i<=totalPedidos;i++){
-    let valor=Math.floor(Math.random()*85000)+18000;
-    totalDia += i>10 ? valor : 0;
-    totalMes += valor;
+  const today   = new Date();
+  const yToday  = today.getFullYear();
+  const mToday  = today.getMonth();
+  const dToday  = today.getDate();
 
-    const cliente = clientes[Math.floor(Math.random()*clientes.length)];
-    const estado = estados[Math.floor(Math.random()*3)];
-    const ciudad = ciudades[Math.floor(Math.random()*ciudades.length)];
+  const ordersRef = ref(db, "orders");
 
-    tbody.innerHTML += `
+  // Escucha en tiempo real los cambios en /orders
+  onValue(ordersRef, (snapshot) => {
+    const data = snapshot.val() || {};
+    const entries = Object.entries(data);
+
+    tbody.innerHTML = "";
+    let totalDia = 0;
+    let totalMes = 0;
+    let totalPedidos = 0;
+
+    if (!entries.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" style="text-align:center;color:#aaa">
+            No hay pedidos registrados todavía.
+          </td>
+        </tr>
+      `;
+    } else {
+      entries.forEach(([key, order]) => {
+        totalPedidos++;
+
+        const total = Number(order.total || 0);
+
+        let created = null;
+        try {
+          if (order.createdAt) created = new Date(order.createdAt);
+        } catch (e) {
+          created = null;
+        }
+
+        if (created && !isNaN(created.getTime())) {
+          const y = created.getFullYear();
+          const m = created.getMonth();
+          const d = created.getDate();
+
+          if (y === yToday && m === mToday) {
+            totalMes += total;
+            if (d === dToday) totalDia += total;
+          }
+        } else {
+          // Si no hay fecha válida, lo contamos en el mes actual por simplicidad
+          totalMes += total;
+        }
+
+        const estadoRaw   = (order.estado || "pendiente").toString();
+        const estadoClass = estadoRaw.replace(/\s+/g, "-").toLowerCase();
+        const estadoLabel = estadoRaw;
+
+        const idPedido = order.idPedido || key;
+        const cliente  = order.cliente || "Sin cliente";
+        const resumen  = order.resumen || "Sin resumen";
+
+        tbody.innerHTML += `
+          <tr>
+            <td>${escapeHtml(String(idPedido))}</td>
+            <td>${escapeHtml(String(cliente))}</td>
+            <td>${escapeHtml(String(resumen))}</td>
+            <td>$${Number(total || 0).toLocaleString()}</td>
+            <td><span class="estado ${estadoClass}">${escapeHtml(estadoLabel)}</span></td>
+          </tr>
+        `;
+      });
+    }
+
+    if (ventasDiaEl) ventasDiaEl.innerText = totalDia.toLocaleString();
+    if (ventasMesEl) ventasMesEl.innerText = totalMes.toLocaleString();
+    if (pedidosEl)   pedidosEl.innerText   = totalPedidos;
+  }, (error) => {
+    console.error("Error leyendo orders:", error);
+    tbody.innerHTML = `
       <tr>
-        <td>#W${1000+i}</td>
-        <td>${cliente}</td>
-        <td>${ciudad}</td>
-        <td>$${valor.toLocaleString()}</td>
-        <td><span class="estado ${estado}">${estado.replace("-"," ")}</span></td>
+        <td colspan="5" style="text-align:center;color:#f55">
+          Error cargando pedidos desde Firebase.
+        </td>
       </tr>
     `;
-  }
-
-  document.getElementById("ventasDia").innerText = totalDia.toLocaleString();
-  document.getElementById("ventasMes").innerText = totalMes.toLocaleString();
-  document.getElementById("pedidosCount").innerText = totalPedidos;
+  });
 }
 
 
@@ -138,7 +212,7 @@ function applyProductFilters() {
   const cat  = document.getElementById("product-category-filter").value;
 
   filteredProducts = allProducts.filter(p => {
-    const name = p.data.Nombre.toLowerCase();
+    const name = (p.data.Nombre || "").toLowerCase();
     return name.includes(term) && (!cat || p.sheetKey===cat);
   });
 

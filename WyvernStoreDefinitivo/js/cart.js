@@ -20,6 +20,9 @@ import {
   mapToAvailableSheetKey
 } from "./stock.js";
 
+// 🔥 IMPORTAMOS AUTH + HELPER PARA GUARDAR PEDIDOS EN FIREBASE
+import { auth, createOrderInDB } from "./firebase.js";
+
 const cartIconBtn = document.getElementById("cart-icon-btn");
 const cartPopupOverlay = document.getElementById("cart-popup-overlay");
 const cartPopup = document.getElementById("cart-popup");
@@ -152,7 +155,7 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
       : card.querySelector(".product-price")?.innerText || "";
   const priceNum = parsePriceNumber(priceRaw);
 
-  // 👇 NUEVO: obtenemos la URL de imagen asociada a la tarjeta
+  // URL de imagen asociada a la tarjeta
   const imgUrl = card.dataset.imgUrl || "";
 
   const origStock = getOriginalStock(sheetKey, row, cache);
@@ -177,7 +180,6 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
       price: priceRaw,
       _priceNum: priceNum,
       qty,
-      // 👇 guardamos la imagen en el carrito
       image: imgUrl
     });
   }
@@ -217,7 +219,7 @@ export function removeFromCart(idx) {
 }
 
 // ======================================
-// FINALIZAR COMPRA (mejorada: devuelve detalles)
+// FINALIZAR COMPRA (ya lo tenías, sin tocarlo)
 // ======================================
 
 /*
@@ -234,7 +236,6 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
     if (!qty) return { ok: true, item: it, newStock: null };
 
     try {
-      // updateStockOnServer_decrement devuelve un objeto { ok: boolean, newStock: number } (o similar)
       const res = await updateStockOnServer_decrement(
         it.sheetKey,
         it.row,
@@ -254,27 +255,21 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
 
   const results = await Promise.all(promises);
 
-  // Procesar resultados: aplicar nuevos stocks para los éxitos y compilar fallos
   for (const r of results) {
     if (r.ok) {
       successes.push({ item: r.item, newStock: r.newStock });
-      // actualizar DOM/serverStock local si viene newStock
       try {
         const mapped = mapToAvailableSheetKey(r.item.sheetKey) || r.item.sheetKey;
         if (r.newStock !== null && r.newStock !== undefined) {
           applyNewStockToDOM(mapped, r.item.row, Number(r.newStock), getReservedQty);
         } else {
-          // si no hay newStock, refrescamos desde servidor como fallback
           const srv = await fetchServerStock(mapped, r.item.row);
           if (srv !== null) applyNewStockToDOM(mapped, r.item.row, Number(srv), getReservedQty);
         }
         refreshCardStockDisplay(r.item.sheetKey, r.item.row, cache);
-      } catch (e) {
-        // swallow
-      }
+      } catch (e) {}
     } else {
       failures.push({ item: r.item, reason: r.reason || "unknown" });
-      // Intentar sincronizar stock al detectar fallo (mejorará la UI)
       try {
         const mapped = mapToAvailableSheetKey(r.item.sheetKey) || r.item.sheetKey;
         const srv = await fetchServerStock(mapped, r.item.row);
@@ -287,6 +282,55 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
   }
 
   return { successes, failures };
+}
+
+// ======================================
+// 🧾 HELPER: CREAR PEDIDO EN FIREBASE
+// ======================================
+
+async function createOrderFromItems(items) {
+  if (!items || !items.length) return null;
+
+  // total
+  const total = items.reduce(
+    (s, p) =>
+      s +
+      parsePriceNumber(
+        p._priceNum !== undefined ? p._priceNum : p.price
+      ) * Number(p.qty || 0),
+    0
+  );
+
+  // resumen corto: "2 x Espada | 1 x Escudo"
+  const resumen = items
+    .map(i => `${i.qty} x ${i.name}`)
+    .join(" | ");
+
+  // cliente desde Firebase Auth (si hay), si no, Invitado
+  const user = auth?.currentUser || null;
+  const cliente = user?.email || user?.uid || "Invitado";
+
+  const idPedido = Date.now().toString();
+
+  const order = {
+    idPedido,
+    cliente,
+    resumen,
+    total,
+    estado: "pendiente",
+    createdAt: new Date().toISOString(),
+    items: items.map(i => ({
+      nombre: i.name,
+      cantidad: Number(i.qty || 0),
+      precioUnitario: parsePriceNumber(
+        i._priceNum !== undefined ? i._priceNum : i.price
+      ),
+    })),
+  };
+
+  // guardar en /orders
+  const firebaseKey = await createOrderInDB(order);
+  return firebaseKey;
 }
 
 // ======================================
@@ -314,7 +358,6 @@ export function openCartPopup() {
         item._priceNum !== undefined ? item._priceNum : item.price
       ) * Number(item.qty || 0);
 
-    // 👇 armamos la URL segura de imagen usando la función global
     const imgSrc = window.getSafeImageUrl
       ? window.getSafeImageUrl(item.image || "")
       : (item.image || "");
@@ -407,7 +450,8 @@ if (cartPopupOverlay)
   });
 
 // ======================================
-// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP (AHORA MANEJA PARCIALES)
+// 🔥 FUNCIÓN PARA ENVIAR CARRITO A WHATSAPP
+//    + REGISTRAR PEDIDO EN FIREBASE
 // ======================================
 
 export async function sendToWhatsApp() {
@@ -417,7 +461,6 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // intentar decrementar en servidor por item
   let result = { successes: [], failures: [] };
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -425,10 +468,9 @@ export async function sendToWhatsApp() {
     result = { successes: [], failures: items.map(it => ({ item: it, reason: String(e) })) };
   }
 
-  // Si hay éxitos: removerlos del carrito local
+  // quitar del carrito los que se pudieron reservar
   if (Array.isArray(result.successes) && result.successes.length > 0) {
     const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
-    // eliminar del carrito los que coinciden
     for (let i = cart.length - 1; i >= 0; i--) {
       const key = `${cart[i].sheetKey}::${cart[i].row}`;
       if (successKeys.includes(key)) cart.splice(i, 1);
@@ -436,10 +478,21 @@ export async function sendToWhatsApp() {
     setCart(cart);
   }
 
-  // Si no hay fallos -> todo ok: abrir WA y limpiar popup
-  if ((!result.failures || result.failures.length === 0)) {
-    // construir mensaje solo con los items que se pagaron (successes)
-    const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
+  const failures = result.failures || [];
+  const failedItems = failures.map(f => f.item);
+  const paidItems = result.successes.length
+    ? result.successes.map(s => s.item)
+    : items; // fallback
+
+  // ✅ CASO 1: todo OK, sin fallos
+  if (!failures.length) {
+    try {
+      await createOrderFromItems(paidItems); // guardamos pedido en Firebase
+    } catch (e) {
+      console.error("Error guardando pedido en Firebase:", e);
+      // no rompemos el flujo de WhatsApp por esto
+    }
+
     let message = "🛒 *Pedido desde WyvernStore*\n\n";
     let total = 0;
     paidItems.forEach(p => {
@@ -451,7 +504,6 @@ export async function sendToWhatsApp() {
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
 
-    // limpieza y UI
     try { saveCart(); } catch (e) {}
     try { updateCartUI(); } catch (e) {}
     try { refreshAllCardDisplays(); } catch (e) {}
@@ -459,18 +511,12 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // Si hay fallos (parciales o totales):
-  // preguntar al usuario si quiere enviar igual y, si acepta, abrir WA con ITEMS PAGADOS + ITEMS SIN PAGAR (según tu UX)
-  const failures = result.failures || [];
-  const failedItems = failures.map(f => f.item);
-  const paidItems = result.successes.map(s => s.item);
-
+  // ❗ CASO 2: hay fallos (stock desactualizado, etc.)
   const proceed = confirm(
     `No fue posible actualizar el stock en el servidor para ${failedItems.length} productos. ¿Deseas enviar el pedido de los demás productos (los que sí se reservaron) por WhatsApp?`
   );
 
   if (!proceed) {
-    // sincronizar stocks fallidos (mejorar UI) y salir
     await Promise.all(failures.map(f => {
       const mapped = mapToAvailableSheetKey(f.item.sheetKey) || f.item.sheetKey;
       return fetchServerStock(mapped, f.item.row).then(s => {
@@ -481,8 +527,14 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // Si el usuario acepta enviar lo que sí se reservó:
+  // Usuario acepta enviar pedido parcial: guardamos pedido solo con los items pagados
   if (paidItems.length) {
+    try {
+      await createOrderFromItems(paidItems);
+    } catch (e) {
+      console.error("Error guardando pedido parcial en Firebase:", e);
+    }
+
     let message = "🛒 *Pedido desde WyvernStore* (parcial)\n\n";
     let total = 0;
     paidItems.forEach(p => {
@@ -495,7 +547,6 @@ export async function sendToWhatsApp() {
     window.open(url, "_blank");
   }
 
-  // Guardar cart (ya removimos los pagados)
   try { saveCart(); } catch(e){}
   try { updateCartUI(); } catch(e){}
   try { refreshAllCardDisplays(); } catch(e){}
@@ -504,9 +555,7 @@ export async function sendToWhatsApp() {
 
 // ======================================
 // EXPONER FUNCIONES AL ÁMBITO GLOBAL
-// (para los onclick inline)
 // ======================================
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
-
