@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contacto | WyvernStore</title>
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Lógica general (login, carrito, etc.) -->
+  <script type="module" src="js/main.js"></script>
+  <!-- Lógica específica del formulario de contacto -->
+  <script type="module" src="js/contact-form.js"></script>
+</head>
+<body class="legal-body">
+  <header>
+    <nav class="nav">
+      <div class="logo">WyvernStore</div>
+
+      <ul class="nav-links">
+        <li><a href="index.html">Inicio</a></li>
+        <li><a href="index.html#catalogo">Catálogo</a></li>
+      </ul>
+
+      <div class="nav-right">
+        <button id="login-btn" class="login-btn">Iniciar sesión</button>
+        <span id="user-label" class="user-label"></span>
+        <button id="cart-icon-btn" class="cart-btn">
+          Carrito
+          <span id="cart-count-badge" class="cart-count-badge">0</span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="legal-wrapper">
+    <section class="legal-hero">
+      <h1>Contacto</h1>
+      <p>
+        Si tienes dudas, sugerencias o necesitas ayuda con el uso de
+        WyvernStore, puedes comunicarte con nosotros a través de los
+        siguientes medios.
+      </p>
+    </section>
+
+    <section class="legal-section contact-grid">
+      <div class="contact-card">
+        <h2>Soporte general</h2>
+        <p>
+          📩 <strong>soporte@wyvernstore.com</strong><br />
+          Horario de respuesta: Lunes a Viernes, 9:00am – 6:00pm.
+        </p>
+      </div>
+
+      <div class="contact-card">
+        <h2>Formulario de contacto</h2>
+        <p>
+          Completa el siguiente formulario y enviaremos tu solicitud al
+          equipo de soporte.
+        </p>
+
+        <form id="contact-form" class="contact-form">
+          <label>
+            Nombre
+            <input type="text" name="nombre" placeholder="Tu nombre" required />
+          </label>
+
+          <label>
+            Correo electrónico
+            <input type="email" name="email" placeholder="tunombre@correo.com" required />
+          </label>
+
+          <label>
+            Mensaje
+            <textarea name="mensaje" rows="4" placeholder="Cuéntanos en qué podemos ayudarte" required></textarea>
+          </label>
+
+          <button type="submit" class="btn-primary">
+            Enviar mensaje
+          </button>
+
+          <!-- Mensajes de estado -->
+          <p id="contact-status" class="contact-status"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
+      <a href="terminos.html">TÉRMINOS</a>
+      <a href="privacidad.html">PRIVACIDAD</a>
+      <a href="contacto.html">CONTACTO</a>
+    </div>
+    <p class="footer-copy">
+      © 2025 WyvernStore. Todos los derechos reservados.
+    </p>
+  </footer>
+</body>
+</html>
