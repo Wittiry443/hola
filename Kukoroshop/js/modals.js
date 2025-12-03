@@ -406,7 +406,7 @@ document.addEventListener("click", async (e) => {
           console.error('[modals] fallo creando orden parcial en Firebase (card):', err);
         }
 
-        let message = "*Pedido (parcial) - WyvernStore*%0A%0A";
+        let message = "*Pedido (parcial) - Kukoro-shop*%0A%0A";
         let total = 0;
         paidItems.forEach(p => {
           const itemTotal = parsePriceNumber(p._priceNum !== undefined ? p._priceNum : p.price) * Number(p.qty || 0);
@@ -452,7 +452,7 @@ export async function sendToWhatsApp(lastProductsCache) {
   }
 
   const buildMessageFromItems = (items) => {
-    let message = "*Nuevo Pedido - WyvernStore*%0A%0A";
+    let message = "*Nuevo Pedido - Kukoro-shop*%0A%0A";
     let total = 0;
     items.forEach((item) => {
       const itemTotal = parsePriceNumber(item._priceNum !== undefined ? item._priceNum : item.price) * Number(item.qty || 0);
@@ -536,3 +536,4 @@ export async function sendToWhatsApp(lastProductsCache) {
   updateCartUI();
   refreshAllCardDisplays();
 }
+
