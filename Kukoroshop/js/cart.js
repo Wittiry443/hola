@@ -576,7 +576,7 @@ export async function sendToWhatsApp() {
       // no rompemos el flujo de WhatsApp por esto
     }
 
-    let message = "🛒 *Pedido desde WyvernStore*\n\n";
+    let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
     let total = 0;
     paidItems.forEach(p => {
       message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
@@ -625,7 +625,7 @@ export async function sendToWhatsApp() {
       _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
     }
 
-    let message = "🛒 *Pedido desde WyvernStore* (parcial)\n\n";
+    let message = "🛒 *Pedido desde Kukoro-shop* (parcial)\n\n";
     let total = 0;
     paidItems.forEach(p => {
       message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
@@ -868,4 +868,5 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
+
 
