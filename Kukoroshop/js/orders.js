@@ -21,11 +21,37 @@ adminBtn?.addEventListener("click", () => location.href = "admin.html");
 
 // Manejo de estado auth
 onAuthStateChanged(auth, async (user) => {
-  if (!user) {
-    // si no está logueado, redirigir al index (o mostrar mensaje)
-    window.location.href = "index.html";
-    return;
-  }
+  if (!user) return window.location.href = "index.html";
+
+  const userOrdersRef = ref(db, `users/${user.uid}/orders`);
+
+  onValue(userOrdersRef, async (snap) => {
+    const val = snap.val();
+    if (val) {
+      renderOrdersObject(val);
+      return;
+    }
+
+    // fallback: leer /orders y filtrar por uid o email (si las reglas lo permiten)
+    try {
+      const ordersSnap = await get(ref(db, "orders"));
+      const all = ordersSnap.val() || {};
+      const filtered = Object.fromEntries(
+        Object.entries(all).filter(([k,o]) => o && (o.uid === user.uid || (o.userEmail && o.userEmail.toLowerCase() === user.email.toLowerCase())))
+      );
+      if (Object.keys(filtered).length) renderOrdersObject(filtered);
+      else renderEmpty();
+    } catch (err) {
+      // permission_denied o error: mostrar mensaje claro
+      console.error("Error fallback leyendo /orders:", err);
+      renderError(err);
+    }
+  }, (err) => {
+    console.error("Error listening user orders:", err);
+    // Si es permission_denied, lo indicamos al usuario y sugerimos contacto
+    renderError(err);
+  });
+});
 
   userLabel.textContent = user.email || "";
 
