@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Mis pedidos — Kukoro-shop</title>
+
+  <link rel="stylesheet" href="styles.css" />
+  <script type="module" src="js/pedidos.js"></script>
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">Kukoro-shop</div>
+
+      <ul class="nav-links"></ul>
+
+      <div class="nav-right">
+        <button id="login-btn" class="login-btn">Iniciar sesión</button>
+        <span id="user-label" class="user-label"></span>
+        <button id="cart-icon-btn" class="cart-icon" aria-label="Abrir carrito">Carrito (0)</button>
+        <button id="orders-btn" class="cart-icon" aria-label="Mis pedidos" title="Mis pedidos">📦 Mis pedidos</button>
+        <button id="admin-panel-btn" class="cart-icon admin-btn" aria-label="Abrir panel admin" title="Panel Admin">🛠 Admin Panel</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="container" style="padding:28px 16px;">
+    <h1 style="margin-bottom:14px">Mis pedidos</h1>
+
+    <section id="my-orders-section" class="card">
+      <div id="orders-loading" style="padding:28px;text-align:center;color:#999;">
+        Cargando tus pedidos...
+      </div>
+
+      <div id="orders-list" style="display:none; padding:8px;"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
+      <a href="terminos.html">TÉRMINOS</a>
+      <a href="privacidad.html">PRIVACIDAD</a>
+      <a href="contacto.html">CONTACTO</a>
+    </div>
+    <p class="footer-copy">© 2025 Kukoro-shop. Todos los derechos reservados.</p>
+  </footer>
+
+  <!-- Mantén si usas popup carrito / auth modal del index -->
+  <script>
+    // Navegación simple: volver al index
+    document.getElementById("logo")?.addEventListener?.("click", ()=> location.href="index.html");
+    document.getElementById("orders-btn").onclick = () => location.href = "pedidos.html";
+    document.getElementById("admin-panel-btn").onclick = () => location.href = "admin.html";
+  </script>
+</body>
+</html>
