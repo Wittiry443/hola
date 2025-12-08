@@ -26,7 +26,6 @@ const firebaseConfig = {
   appId: "1:477164151404:web:f85dcf08c657fd544c6e49",
   measurementId: "G-KNJ9282F1Z"
   // IMPORTANT: si usas Realtime Database, añade aquí la URL desde la consola:
- //databaseURL: "https://kukoroshop-default-rtdb.firebaseio.com"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -63,6 +62,7 @@ export async function createOrderInDB(order) {
     return { ok: false, key: null, error: String(err) };
   }
 }
+
 
 
 
