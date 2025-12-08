@@ -58,18 +58,19 @@ export async function createOrderInDB(order, user = null) {
       userEmail: user?.email || null
     };
 
-    // Guardar en /orders
     await set(newRef, payload);
 
-    // Guardar copia bajo /users/{uid}/orders/{orderKey} (si tenemos uid)
     if (user?.uid) {
       const userOrderRef = ref(db, `users/${user.uid}/orders/${newRef.key}`);
       await set(userOrderRef, payload);
     }
 
+    console.log("[firebase] order saved:", newRef.key);
     return { ok: true, key: newRef.key, error: null };
   } catch (err) {
+    console.error("[firebase] createOrderInDB ERROR:", err);
     return { ok: false, key: null, error: String(err) };
   }
 }
+
 
