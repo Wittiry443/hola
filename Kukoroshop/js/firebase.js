@@ -18,13 +18,13 @@ import {
 
 // 🔥 Configuración de tu proyecto Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyDRj60t21mA7eb2s6N3cgqtMGBwc3BU1b4",
-  authDomain: "wyvernstore-11f0e.firebaseapp.com",
-  projectId: "wyvernstore-11f0e",
-  storageBucket: "wyvernstore-11f0e.firebasestorage.app",
-  messagingSenderId: "81806961108",
-  appId: "1:81806961108:web:8ae2d5b1980244d5220e41",
-  measurementId: "G-CKFZSD52SY",
+  apiKey: "AIzaSyD8AG_aIUYEMLiXy3WvZaa5qnPoucC4Uu4",
+  authDomain: "kukoroshop.firebaseapp.com",
+  projectId: "kukoroshop",
+  storageBucket: "kukoroshop.firebasestorage.app",
+  messagingSenderId: "477164151404",
+  appId: "1:477164151404:web:f85dcf08c657fd544c6e49",
+  measurementId: "G-KNJ9282F1Z"
   // IMPORTANT: si usas Realtime Database, añade aquí la URL desde la consola:
   // databaseURL: "https://<tu-proyecto>.firebaseio.com",
 };
@@ -63,3 +63,4 @@ export async function createOrderInDB(order) {
     return { ok: false, key: null, error: String(err) };
   }
 }
+
