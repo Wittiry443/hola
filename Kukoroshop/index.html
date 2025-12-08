@@ -35,6 +35,10 @@
           Carrito (0)
         </button>
 
+         <button id="orders-btn" class="cart-icon" aria-label="Mis pedidos" title="Mis pedidos">
+          Mis pedidos
+        </button>
+
         <!-- 🔥 BOTÓN ADMIN (oculto por defecto, solo aparece si es admin) -->
         <button id="admin-panel-btn" class="cart-icon admin-btn" aria-label="Abrir panel admin" title="Panel Admin">
           🛠 Admin Panel
@@ -141,8 +145,15 @@
     };
   </script>
 
+  <script>
+  document.getElementById("orders-btn").onclick = () => {
+    window.location.href = "pedidos.html";
+  };
+</script>
+
 </body>
 </html>
+
 
 
 
