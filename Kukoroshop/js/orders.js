@@ -10,12 +10,75 @@ const userLabel = document.getElementById("user-label");
 const cartBtn = document.getElementById("cart-icon-btn");
 const adminBtn = document.getElementById("admin-panel-btn");
 
+// INYECTAR ESTILOS Y MODAL PARA LA FACTURA (Auto-ejecutable)
+(function setupInvoiceUI() {
+  // 1. Inyectar CSS para el modal
+  const style = document.createElement('style');
+  style.innerHTML = `
+    .invoice-modal-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); z-index: 1000; display: none;
+      justify-content: center; align-items: center; padding: 20px;
+    }
+    .invoice-modal {
+      background: white; width: 100%; max-width: 600px; max-height: 90vh;
+      border-radius: 12px; display: flex; flex-direction: column;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: hidden;
+    }
+    .invoice-header { padding: 20px; background: #f8f9fa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    .invoice-body { padding: 20px; overflow-y: auto; }
+    .invoice-footer { padding: 15px 20px; border-top: 1px solid #eee; text-align: right; background: #fff; }
+    .invoice-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+    .invoice-items-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; }
+    .invoice-items-table th { text-align: left; border-bottom: 2px solid #eee; padding: 8px; color: #666; }
+    .invoice-items-table td { border-bottom: 1px solid #eee; padding: 8px; vertical-align: top; }
+    .btn-close-invoice { background: none; border: none; font-size: 24px; cursor: pointer; color: #555; }
+    .btn-invoice-action { background: #333; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn-invoice-action:hover { background: #000; }
+    .btn-view-invoice {
+        background-color: #fff; border: 1px solid #ccc; padding: 6px 12px;
+        border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 8px; transition: all 0.2s;
+    }
+    .btn-view-invoice:hover { background-color: #f0f0f0; border-color: #bbb; }
+  `;
+  document.head.appendChild(style);
+
+  // 2. Crear estructura HTML del modal
+  const modalHTML = `
+    <div id="invoice-overlay" class="invoice-modal-overlay">
+      <div class="invoice-modal">
+        <div class="invoice-header">
+          <h3 style="margin:0">Detalle de Factura</h3>
+          <button id="close-invoice-btn" class="btn-close-invoice">&times;</button>
+        </div>
+        <div id="invoice-content" class="invoice-body">
+          </div>
+        <div class="invoice-footer">
+          <button class="btn-invoice-action" onclick="window.print()">Imprimir / Guardar PDF</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+  // 3. Evento cerrar
+  document.getElementById('close-invoice-btn').onclick = () => {
+    document.getElementById('invoice-overlay').style.display = 'none';
+  };
+  // Cerrar al hacer clic fuera
+  document.getElementById('invoice-overlay').onclick = (e) => {
+    if (e.target.id === 'invoice-overlay') {
+        document.getElementById('invoice-overlay').style.display = 'none';
+    }
+  };
+})();
+
 // Safety: ensure required nodes exist
 if (!loadingEl || !listEl) {
   console.warn("Elementos de UI de pedidos no encontrados.");
 }
 
-// Optional handlers for buttons (no-op placeholder si no implementado)
+// Optional handlers
 cartBtn?.addEventListener("click", () => { /* abrir carrito */ });
 adminBtn?.addEventListener("click", () => location.href = "admin.html");
 
@@ -23,24 +86,19 @@ adminBtn?.addEventListener("click", () => location.href = "admin.html");
 onAuthStateChanged(auth, async (user) => {
   if (!user) return window.location.href = "index.html";
 
-  // Mostrar email en la UI (si existe)
   if (userLabel) userLabel.textContent = user.email || "";
 
-  // Forzar refresh del token por si cambió algún claim
   try { await auth.currentUser.getIdToken(true); } catch (err) { console.warn("No se pudo refrescar token:", err); }
 
-  // Iniciar la escucha de los pedidos del usuario
   listenUserOrders(user.uid, user.email || "");
 });
 
-// Función que obtiene info legible del usuario actual
 function getCurrentUserInfo() {
   const u = auth.currentUser;
   if (!u) return { uid: null, email: null, displayName: null };
   return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
 }
 
-// Función que escucha/lee los pedidos del usuario
 function listenUserOrders(uid, email) {
   loadingEl && (loadingEl.style.display = "block");
   listEl && (listEl.style.display = "none");
@@ -48,7 +106,6 @@ function listenUserOrders(uid, email) {
 
   const userOrdersRef = ref(db, `users/${uid}/orders`);
 
-  // Intentamos escuchar /users/{uid}/orders en vivo
   onValue(userOrdersRef, async (snap) => {
     try {
       const val = snap.val();
@@ -57,7 +114,7 @@ function listenUserOrders(uid, email) {
         return;
       }
 
-      // Si no hay pedidos en users/{uid}/orders, fallback a /orders y filtrado
+      // Fallback a /orders
       const ordersRef = ref(db, "orders");
       const ordersSnap = await get(ordersRef);
       const all = ordersSnap.val() || {};
@@ -77,20 +134,18 @@ function listenUserOrders(uid, email) {
         renderEmpty();
       }
     } catch (err) {
-      // fallback read error (por ejemplo permission_denied)
       const ctx = getCurrentUserInfo();
       console.error("Error leyendo orders (fallback):", err, "requesting user:", ctx);
       renderError(err, ctx);
     }
   }, (err) => {
-    // onValue error (p.ej. permission_denied)
     const ctx = getCurrentUserInfo();
     console.error("Error listening user orders:", err, "requesting user:", ctx);
     renderError(err, ctx);
   });
 }
 
-// Renderiza pedidos (obj: { key: order })
+// Renderiza pedidos
 function renderOrdersObject(obj) {
   loadingEl && (loadingEl.style.display = "none");
   listEl && (listEl.style.display = "block");
@@ -107,6 +162,7 @@ function renderOrdersObject(obj) {
   }
 
   listEl.innerHTML = "";
+  
   entries.forEach(([key, order]) => {
     const idPedido = order.idPedido || key;
     const cliente  = order.cliente || order.userEmail || "Sin cliente";
@@ -117,6 +173,9 @@ function renderOrdersObject(obj) {
     const createdAt = order.createdAt ? new Date(order.createdAt) : null;
     const createdTxt = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleString() : "—";
 
+    // ID único para el botón
+    const btnId = `btn-invoice-${key}`;
+
     const html = `
       <article class="order-card" style="border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -126,15 +185,121 @@ function renderOrdersObject(obj) {
           </div>
           <div style="text-align:right">
             <div style="font-weight:700">${fmtPrice(total)}</div>
-            <div style="margin-top:6px"><span class="estado" style="padding:6px 10px;border-radius:999px;background:#f0f0f0">${escapeHtml(estado)}</span></div>
+            <div style="margin-top:6px">
+                <span class="estado" style="padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:12px;">${escapeHtml(estado)}</span>
+            </div>
           </div>
         </div>
-        <div style="margin-top:10px;color:#444">${escapeHtml(resumen)}</div>
+        <div style="margin-top:10px;color:#444;font-size:14px;">${escapeHtml(resumen)}</div>
+        
+        <div style="margin-top:12px; border-top:1px solid #eee; padding-top:8px; text-align:right;">
+            <button id="${btnId}" class="btn-view-invoice">📄 Ver Factura</button>
+        </div>
       </article>
     `;
 
     listEl.insertAdjacentHTML("beforeend", html);
+
+    // Asignar evento al botón recién creado
+    const btn = document.getElementById(btnId);
+    if(btn) {
+        btn.addEventListener('click', () => showInvoiceDetails(order, idPedido, createdTxt));
+    }
   });
+}
+
+// LÓGICA PARA LLENAR Y MOSTRAR EL MODAL DE FACTURA
+function showInvoiceDetails(order, idDisplay, dateDisplay) {
+    const modalOverlay = document.getElementById('invoice-overlay');
+    const contentEl = document.getElementById('invoice-content');
+    
+    // Obtener items (soportando estructura 'items' o 'cart')
+    const items = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
+    
+    // Generar filas de la tabla
+    const itemsHtml = items.map(item => {
+        const name = item.name || item.title || item.id || 'Producto';
+        const qty = item.qty || item.quantity || 1;
+        const price = item.price || 0;
+        const sub = price * qty;
+        return `
+            <tr>
+                <td>
+                    <strong style="display:block;color:#333;">${escapeHtml(name)}</strong>
+                    <span style="font-size:12px;color:#888;">Ref: ${item.id || '-'}</span>
+                </td>
+                <td style="text-align:center;">${qty}</td>
+                <td style="text-align:right;">${fmtPrice(price)}</td>
+                <td style="text-align:right;">${fmtPrice(sub)}</td>
+            </tr>
+        `;
+    }).join('');
+
+    // Datos del cliente
+    const clienteNombre = order.cliente || order.userEmail || "No especificado";
+    const clienteEmail = order.userEmail || "No especificado";
+    const direccion = order.address || order.direccion || "No especificada";
+    const telefono = order.phone || order.telefono || "";
+
+    const html = `
+        <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h4 style="margin:0 0 5px 0; color:#444;">Kukoro-shop</h4>
+            <div style="font-size:13px; color:#666;">Confirmación de Orden</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:20px;">
+            <div style="flex:1; min-width:200px;">
+                <strong style="color:#333; display:block; margin-bottom:4px;">Facturar a:</strong>
+                <div style="color:#555; font-size:14px;">
+                    ${escapeHtml(clienteNombre)}<br>
+                    ${escapeHtml(clienteEmail)}<br>
+                    ${escapeHtml(direccion)}<br>
+                    ${telefono ? escapeHtml(telefono) : ''}
+                </div>
+            </div>
+            <div style="flex:1; min-width:200px; text-align:right;">
+                 <strong style="color:#333; display:block; margin-bottom:4px;">Detalles:</strong>
+                 <div style="color:#555; font-size:14px;">
+                    ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>
+                    Fecha: ${escapeHtml(dateDisplay)}<br>
+                    Estado: ${escapeHtml(order.estado || order.status || 'Pendiente')}
+                 </div>
+            </div>
+        </div>
+
+        <table class="invoice-items-table">
+            <thead>
+                <tr>
+                    <th style="width:50%">Producto</th>
+                    <th style="text-align:center;">Cant.</th>
+                    <th style="text-align:right;">Precio</th>
+                    <th style="text-align:right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${itemsHtml || '<tr><td colspan="4" style="text-align:center;padding:20px;">No hay items detallados</td></tr>'}
+            </tbody>
+        </table>
+
+        <div style="border-top:2px solid #eee; padding-top:15px;">
+            <div class="invoice-row">
+                <span>Subtotal:</span>
+                <span>${fmtPrice(order.subtotal || order.total || 0)}</span>
+            </div>
+            ${order.shippingCost ? `
+            <div class="invoice-row">
+                <span>Envío:</span>
+                <span>${fmtPrice(order.shippingCost)}</span>
+            </div>` : ''}
+            <div class="invoice-row" style="font-size:18px; font-weight:bold; color:#000; margin-top:10px;">
+                <span>TOTAL:</span>
+                <span>${fmtPrice(order.total || 0)}</span>
+            </div>
+        </div>
+    `;
+
+    contentEl.innerHTML = html;
+    modalOverlay.style.display = 'flex';
 }
 
 function summarizeOrder(order) {
@@ -160,7 +325,6 @@ function renderError(err, userCtx = null) {
   listEl && (listEl.style.display = "block");
   const msg = (err && err.message) ? escapeHtml(err.message) : "Error desconocido";
 
-  // Construir cadena adicional con info del usuario que hizo la request
   let userInfoHtml = "";
   if (userCtx) {
     const u = escapeHtml(String(userCtx.uid || "null"));
