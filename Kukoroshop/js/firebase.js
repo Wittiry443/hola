@@ -46,12 +46,9 @@ export const db = getDatabase(app);
  * Guarda un pedido en /orders en la Realtime Database.
  * Devuelve un objeto { ok: boolean, key: string|null, error: string|null }
  */
-export async function createOrderInDB(order, user = null) {
+export async function createOrderInDB(order, user) {
   try {
-    const ordersRef = ref(db, "orders");
-    const newRef = push(ordersRef);
     const now = Date.now();
-
     const payload = {
       ...order,
       createdAt: now,
@@ -59,21 +56,21 @@ export async function createOrderInDB(order, user = null) {
       userEmail: user?.email || null
     };
 
+    // /orders (push)
+    const newRef = push(ref(db, "orders"));
     await set(newRef, payload);
 
+    // copia segura en /users/{uid}/orders/{key}
     if (user?.uid) {
-      const userOrderRef = ref(db, `users/${user.uid}/orders/${newRef.key}`);
-      await set(userOrderRef, payload);
+      await set(ref(db, `users/${user.uid}/orders/${newRef.key}`), payload);
     }
 
-    console.log("[firebase] order saved:", newRef.key);
     return { ok: true, key: newRef.key };
   } catch (err) {
-    console.error("[firebase] createOrderInDB ERROR:", err);
+    console.error("createOrderInDB error:", err);
     return { ok: false, error: String(err) };
   }
 }
-
 export async function ensureUserRecord(user) {
   if (!user || !user.uid) return;
   try {
@@ -97,3 +94,4 @@ export async function ensureUserRecord(user) {
     return { ok: false, error: String(err) };
   }
 }
+
