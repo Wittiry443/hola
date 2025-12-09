@@ -86,51 +86,44 @@ function initAdminUI() {
 // -----------------------------------------------------------
 // 📦 DASHBOARD DE PEDIDOS (lee users/{uid}/orders)
 // -----------------------------------------------------------
+// Reemplaza la lógica previa de generarDashboardPedidos -> onValue(ordersRef,...)
+// con este código:
+
 function generarDashboardPedidos() {
   const tbody = document.getElementById("orders-table-body");
   if (!tbody) return;
 
   const ventasDiaEl = document.getElementById("ventasDia");
   const ventasMesEl = document.getElementById("ventasMes");
-  const pedidosEl = document.getElementById("pedidosCount");
+  const pedidosEl   = document.getElementById("pedidosCount");
 
-  tbody.innerHTML = `
-    <tr>
-      <td colspan="6" style="text-align:center;color:#999">
-        Cargando pedidos desde Firebase (users/*/orders)...
-      </td>
-    </tr>
-  `;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">Cargando pedidos desde Firebase...</td></tr>`;
 
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const day = today.getDate();
+  const today  = new Date();
+  const year   = today.getFullYear();
+  const month  = today.getMonth();
+  const day    = today.getDate();
 
   const usersRef = ref(db, "users");
 
-  // Escuchamos usuarios completos y extraemos orders de cada uno
+  // Escuchar todos los usuarios (admins deberían tener permiso según las reglas)
   onValue(usersRef, (snapshot) => {
     const users = snapshot.val() || {};
-    const entries = []; // { key, order, uid, userEmail }
+    const flatOrders = {}; // key -> { order, uid }
 
     Object.entries(users).forEach(([uid, udata]) => {
-      const orders = udata.orders || {};
-      Object.entries(orders).forEach(([key, order]) => {
-        entries.push({
-          key,
-          order,
-          uid,
-          userEmail: udata.email || order.userEmail || udata.email || ""
-        });
+      const uOrders = udata.orders || {};
+      Object.entries(uOrders).forEach(([k, o]) => {
+        // guardamos copia plana con uid para saber dónde actualizar/eliminar
+        flatOrders[k] = { order: o, uid };
       });
     });
 
-    // ordenar por createdAt (desc)
-    entries.sort((a, b) => {
-      const ta = a.order?.createdAt || 0;
-      const tb = b.order?.createdAt || 0;
-      return Number(tb) - Number(ta);
+    // renderizar la tabla a partir de flatOrders
+    const entries = Object.entries(flatOrders).sort((a, b) => {
+      const ta = a[1].order?.createdAt || 0;
+      const tb = b[1].order?.createdAt || 0;
+      return tb - ta;
     });
 
     let totalDia = 0;
@@ -140,24 +133,19 @@ function generarDashboardPedidos() {
     tbody.innerHTML = "";
 
     if (!entries.length) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="6" style="text-align:center;color:#aaa">
-            No hay pedidos registrados todavía.
-          </td>
-        </tr>
-      `;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">No hay pedidos registrados todavía.</td></tr>`;
     } else {
-      entries.forEach(({ key, order, uid }) => {
+      entries.forEach(([key, meta]) => {
         totalPedidos++;
-        const total = Number(order.total || 0);
+        const order = meta.order || {};
+        const uid = meta.uid;
 
+        const total = Number(order.total || 0);
         let created = null;
         try { if (order.createdAt) created = new Date(order.createdAt); } catch (e) { created = null; }
 
         const estado = (order.estado || "pendiente").toString();
         const estadoLower = estado.toLowerCase();
-
         if (created && !isNaN(created.getTime())) {
           const y = created.getFullYear();
           const m = created.getMonth();
@@ -173,15 +161,14 @@ function generarDashboardPedidos() {
         }
 
         const idPedido = order.idPedido || key;
-        const cliente = order.cliente || order.userEmail || "Sin cliente";
-        const resumen = order.resumen || "Sin resumen";
+        const cliente  = order.cliente || order.userEmail || "Sin cliente";
+        const resumen  = order.resumen || "Sin resumen";
         const estadoClass = estadoLower.replace(/\s+/g, "-");
 
         const optionsHtml = ORDER_STATUSES.map(st => `
           <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>
         `).join("");
 
-        // añadimos data-order-uid para poder actualizar / borrar la orden correctamente
         tbody.innerHTML += `
 <tr data-order-key="${escapeHtml(key)}" data-order-uid="${escapeHtml(uid)}">
   <td>${escapeHtml(String(idPedido))}</td>
@@ -205,24 +192,20 @@ function generarDashboardPedidos() {
 
     if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
     if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
-    if (pedidosEl) pedidosEl.textContent = totalPedidos;
+    if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
 
-    // Listeners para selects de estado
+    // Listeners para selects de estado (usamos uid para actualizar la copia correcta)
     tbody.querySelectorAll(".order-status-select").forEach(sel => {
       sel.onchange = async () => {
         const key = sel.dataset.orderKey;
         const uid = sel.dataset.orderUid;
         const newStatus = sel.value;
-        try {
-          await updateOrderStatus(uid, key, newStatus);
-        } catch (e) {
-          console.error("Error actualizando estado:", e);
-          alert("No se pudo actualizar el estado. Revisa la consola.");
-        }
+        try { await updateOrderStatus_forUser(key, uid, newStatus); }
+        catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
       };
     });
 
-    // Listeners para editar pedido
+    // Edit buttons
     tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
@@ -231,7 +214,7 @@ function generarDashboardPedidos() {
           const snap = await get(ref(db, `users/${uid}/orders/${key}`));
           const order = snap.val();
           if (!order) return alert("Pedido no encontrado.");
-          openEditOrderModal(uid, key, order);
+          openEditOrderModal(key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
         } catch (e) {
           console.error("Error cargando pedido para editar:", e);
           alert("No se pudo cargar el pedido. Revisa la consola.");
@@ -239,83 +222,41 @@ function generarDashboardPedidos() {
       };
     });
 
-    // Listeners para eliminar
+    // Delete buttons
     tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
         const uid = btn.dataset.orderUid;
         if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
-        try {
-          await deleteOrder(uid, key);
-          alert("Pedido eliminado.");
-        } catch (e) {
-          console.error("Error eliminando pedido:", e);
-          alert("No se pudo eliminar el pedido. Revisa la consola.");
-        }
+        try { await deleteOrder_forUser(key, uid); }
+        catch (e) { console.error("Error eliminando pedido:", e); alert("No se pudo eliminar el pedido. Revisa la consola."); }
       };
     });
+
   }, (error) => {
     console.error("Error leyendo users/*/orders:", error);
-
-    if (error && error.code && error.code === "permission_denied") {
-      const currentUser = auth.currentUser;
-      const uid = currentUser ? currentUser.uid : "no-uid";
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="6" style="text-align:center;color:#f55">
-            Error: permission_denied al leer users/*/orders. UID actual: ${escapeHtml(String(uid))}. Revisa las reglas de Realtime DB.
-          </td>
-        </tr>
-      `;
-    } else {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="6" style="text-align:center;color:#f55">
-            Error cargando pedidos desde Firebase.
-          </td>
-        </tr>
-      `;
-    }
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center;color:#f55">
+          Error cargando pedidos desde Firebase. ${error && error.message ? escapeHtml(error.message) : ""}
+        </td>
+      </tr>
+    `;
   });
 }
 
-// Actualizar estado en Firebase (se opera sobre users/{uid}/orders/{key})
-async function updateOrderStatus(uid, orderKey, newStatus) {
-  const orderPath = `users/${uid}/orders/${orderKey}`;
-  try {
-    await update(ref(db, orderPath), { estado: newStatus });
-    console.log(`[admin] order ${orderKey} status updated -> ${newStatus}`);
-
-    // (Opcional) Si existiera una copia en /orders/{orderKey} y quieres eliminarla, descomenta:
-    // try { await remove(ref(db, `orders/${orderKey}`)); } catch(e){ /* no fatal */ }
-
-  } catch (err) {
-    console.error("updateOrderStatus error:", err);
-    throw err;
-  }
+// Helper: actualizar estado en users/{uid}/orders/{orderKey}
+async function updateOrderStatus_forUser(orderKey, uid, newStatus) {
+  if (!uid) throw new Error("No UID provided for order");
+  await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
+  console.log(`[admin] users/${uid}/orders/${orderKey} estado -> ${newStatus}`);
 }
 
-// Eliminar pedido en Firebase (borra users/{uid}/orders/{key})
-async function deleteOrder(uid, orderKey) {
-  try {
-    await remove(ref(db, `users/${uid}/orders/${orderKey}`));
-    console.log("[admin] order deleted (users node):", orderKey);
-
-    // (Opcional) Si existiera la copia legacy en /orders, intenta eliminarla también (no obligatorio)
-    try {
-      const legacySnap = await get(ref(db, `orders/${orderKey}`));
-      if (legacySnap.exists()) {
-        await remove(ref(db, `orders/${orderKey}`));
-        console.log("[admin] removed legacy /orders copy:", orderKey);
-      }
-    } catch (e) {
-      console.warn("No se pudo limpiar legacy /orders:", e);
-    }
-
-  } catch (err) {
-    console.error("deleteOrder error:", err);
-    throw err;
-  }
+// Helper: eliminar en users/{uid}/orders/{orderKey}
+async function deleteOrder_forUser(orderKey, uid) {
+  if (!uid) throw new Error("No UID provided for order");
+  await remove(ref(db, `users/${uid}/orders/${orderKey}`));
+  console.log(`[admin] users/${uid}/orders/${orderKey} eliminado`);
 }
 
 // ----------------------------------------------------
@@ -670,6 +611,7 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
 
 
