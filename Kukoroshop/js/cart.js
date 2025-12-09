@@ -312,7 +312,8 @@ async function _retryPendingOrderIfAny() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     console.log('[orders] found pending order in localStorage, retrying...', parsed);
-    const res = await createOrderFromItems(parsed.items);
+    // parsed may contain { items, shipping?, paymentMeta?, createdAt, firebaseKey }
+    const res = await createOrderFromItems(parsed.items, parsed.shipping || null);
     if (res && res.ok) {
       console.log('[orders] pending order created successfully on retry:', res.firebaseKey);
       if (parsed.paymentMeta && typeof window._markOrderAsPaid === 'function') {
@@ -344,6 +345,138 @@ window.addEventListener('load', () => {
 });
 
 // ======================================
+// SHIPPING MODAL (dinámico) - devuelve Promise<shipping|null>
+// ======================================
+
+function ensureShippingModalExists() {
+  if (document.getElementById("shipping-modal-overlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "shipping-modal-overlay";
+  overlay.style = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:40000;";
+  overlay.innerHTML = `
+    <div id="shipping-modal" style="width:92%;max-width:540px;background:#fff;border-radius:10px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+      <h3 style="margin:0 0 8px 0">Dirección de envío</h3>
+      <div style="max-height:60vh;overflow:auto" id="shipping-modal-body">
+        <div style="display:grid;grid-template-columns:1fr;gap:8px">
+          <label style="font-weight:700">Calle / Dirección
+            <input id="shipping-addressLine" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+          </label>
+          <div style="display:flex;gap:8px">
+            <label style="flex:1;font-weight:700">Ciudad
+              <input id="shipping-city" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+            </label>
+            <label style="width:160px;font-weight:700">Departamento
+              <input id="shipping-state" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+            </label>
+          </div>
+          <div style="display:flex;gap:8px">
+            <label style="flex:1;font-weight:700">Código postal
+              <input id="shipping-postalCode" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+            </label>
+            <label style="width:160px;font-weight:700">Teléfono
+              <input id="shipping-phone" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+            </label>
+          </div>
+          <label style="font-weight:700">Notas / dirección completa
+            <textarea id="shipping-fullAddress" rows="3" style="width:100%;padding:8px;border-radius:6px;margin-top:4px"></textarea>
+          </label>
+          <label style="font-weight:700">
+            <input type="checkbox" id="shipping-save-local" /> Guardar esta dirección en este equipo (local)
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+        <button id="shipping-cancel" class="btn-ghost btn-small">Cancelar</button>
+        <button id="shipping-save" class="btn-primary btn-small">Guardar y continuar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // prevent clicks propagating closing accidentally (overlay click cancels)
+  overlay.onclick = (e) => {
+    if (e.target === overlay) {
+      overlay.style.display = "none";
+      // don't remove saved promise handlers here; handlers manage resolve
+    }
+  };
+}
+
+/**
+ * Muestra modal de dirección. prefill: optional shipping object to fill inputs.
+ * Retorna Promise resuelta con shipping object o null si cancela.
+ */
+function showShippingModal(prefill = {}) {
+  ensureShippingModalExists();
+  const overlay = document.getElementById("shipping-modal-overlay");
+  const addrInp = document.getElementById("shipping-addressLine");
+  const cityInp = document.getElementById("shipping-city");
+  const stateInp = document.getElementById("shipping-state");
+  const postalInp = document.getElementById("shipping-postalCode");
+  const phoneInp = document.getElementById("shipping-phone");
+  const fullInp = document.getElementById("shipping-fullAddress");
+  const saveChk = document.getElementById("shipping-save-local");
+  const saveBtn = document.getElementById("shipping-save");
+  const cancelBtn = document.getElementById("shipping-cancel");
+
+  // fill from prefill or from localStorage
+  const stored = (() => {
+    try { return JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null"); } catch (e) { return null; }
+  })();
+
+  const fill = prefill && Object.keys(prefill).length ? prefill : (stored || {});
+  addrInp.value = fill.addressLine || "";
+  cityInp.value = fill.city || "";
+  stateInp.value = fill.state || "";
+  postalInp.value = fill.postalCode || "";
+  phoneInp.value = fill.phone || "";
+  fullInp.value = fill.fullAddress || "";
+  saveChk.checked = !!stored;
+
+  overlay.style.display = "flex";
+
+  return new Promise((resolve) => {
+    function doClose(val) {
+      // remove handlers
+      saveBtn.onclick = null;
+      cancelBtn.onclick = null;
+      overlay.style.display = "none";
+      resolve(val);
+    }
+
+    cancelBtn.onclick = () => {
+      doClose(null);
+    };
+
+    saveBtn.onclick = () => {
+      const shipping = {
+        addressLine: addrInp.value.trim() || null,
+        city: cityInp.value.trim() || null,
+        state: stateInp.value.trim() || null,
+        postalCode: postalInp.value.trim() || null,
+        phone: phoneInp.value.trim() || null,
+        fullAddress: fullInp.value.trim() || null
+      };
+      // remove null-ish keys
+      Object.keys(shipping).forEach(k => { if (shipping[k] === null || shipping[k] === "") delete shipping[k]; });
+
+      // if user asked to save locally, persist minimal shipping
+      try {
+        if (saveChk.checked) {
+          localStorage.setItem("wyvern_last_shipping", JSON.stringify(shipping));
+        }
+      } catch (e) {
+        console.warn("Cannot save shipping locally:", e);
+      }
+
+      doClose(shipping);
+    };
+  });
+}
+
+// ======================================
 // 🧾 HELPER: CREAR PEDIDO EN FIREBASE
 //    Compatible con createOrderInDB que devuelve string key o un objeto { ok, key }
 // ======================================
@@ -360,9 +493,10 @@ function _extractKey(res) {
 
 /** 
  * Exportada para que otros módulos (modals.js) puedan crear la orden.
+ * Ahora acepta second arg `shipping` que se incluirá en la orden guardada.
  * Devuelve { ok: boolean, firebaseKey: string|null, error: string|null, order }
  */
-export async function createOrderFromItems(items) {
+export async function createOrderFromItems(items, shipping = null) {
   if (!items || !items.length) return { ok: false, firebaseKey: null, error: "empty_items" };
 
   // total
@@ -400,6 +534,10 @@ export async function createOrderFromItems(items) {
     })),
   };
 
+  if (shipping && Object.keys(shipping).length) {
+    order.shipping = shipping;
+  }
+
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
   try {
@@ -409,7 +547,6 @@ export async function createOrderFromItems(items) {
         await ensureUserRecord(user);
       } catch (e) {
         console.warn("[orders] ensureUserRecord fallo (no crítico):", e);
-        // no abortamos la creación del pedido por esto
       }
     }
 
@@ -419,8 +556,8 @@ export async function createOrderFromItems(items) {
 
     if (!key) {
       console.error("[orders] createOrderInDB returned no key:", res);
-      // guardar pending y devolver error
-      _savePendingOrderLocally({ items, createdAt: Date.now() });
+      // guardar pending y devolver error (incluimos shipping para retry)
+      _savePendingOrderLocally({ items, shipping, createdAt: Date.now() });
       return { ok: false, firebaseKey: null, error: "no_key_returned", order };
     }
 
@@ -429,7 +566,7 @@ export async function createOrderFromItems(items) {
   } catch (err) {
     console.error("[orders] createOrderFromItems EXCEPTION:", err);
     const errMsg = err && err.message ? err.message : String(err);
-    _savePendingOrderLocally({ items, createdAt: Date.now() });
+    _savePendingOrderLocally({ items, shipping, createdAt: Date.now() });
     return { ok: false, firebaseKey: null, error: errMsg, order };
   }
 }
@@ -588,19 +725,43 @@ export async function sendToWhatsApp() {
   // ✅ CASO 1: todo OK, sin fallos
   if (!failures.length) {
     try {
-      const createRes = await createOrderFromItems(paidItems);
+      // Pedimos dirección antes de guardar y enviar el WA
+      const shipping = await showShippingModal(); // si user cancela -> null
+      if (!shipping) {
+        // si no quiere dar dirección, confirmamos si procede sin dirección
+        const proceed = confirm("No se ingresó dirección de envío. ¿Deseas continuar sin dirección (la orden se guardará sin dirección)?");
+        if (!proceed) {
+          // devolvemos stock localmente re-sync y abortamos
+          await Promise.all(paidItems.map(p => {
+            const mapped = mapToAvailableSheetKey(p.sheetKey) || p.sheetKey;
+            return fetchServerStock(mapped, p.row).then(s => {
+              if (s !== null) applyNewStockToDOM(mapped, p.row, Number(s), getReservedQty);
+            }).catch(()=>{});
+          }));
+          refreshAllCardDisplays();
+          return;
+        }
+      }
+
+      const createRes = await createOrderFromItems(paidItems, shipping || null);
       if (!createRes || !createRes.ok) {
         console.warn("[orders] createOrderFromItems failed (WA):", createRes && createRes.error);
-        // guardar pendiente por si acaso
-        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
+        // guardar pendiente por si acaso (incluimos shipping)
+        _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
       } else {
         console.log("[orders] WA order created:", createRes.firebaseKey);
       }
     } catch (e) {
       console.error("Error guardando pedido en Firebase (WA):", e);
+      // si algo falla guardamos pending con shipping si lo teníamos
       _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
-      // no rompemos el flujo de WhatsApp por esto
     }
+
+    // construir mensaje WA incluyendo dirección si existe en localStorage
+    let shippingForMsg = null;
+    try {
+      shippingForMsg = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null");
+    } catch (e) { shippingForMsg = null; }
 
     let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
     let total = 0;
@@ -608,7 +769,18 @@ export async function sendToWhatsApp() {
       message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
       total += parsePriceNumber(p.price) * p.qty;
     });
-    message += `\nTotal: *$${total}*\n`;
+    message += `\nTotal: *$${total}*\n\n`;
+
+    if (shippingForMsg) {
+      message += `📦 *Dirección de envío:*\n`;
+      if (shippingForMsg.addressLine) message += `${shippingForMsg.addressLine}\n`;
+      if (shippingForMsg.city || shippingForMsg.state) message += `${shippingForMsg.city || ""} ${shippingForMsg.state || ""}\n`;
+      if (shippingForMsg.postalCode) message += `CP: ${shippingForMsg.postalCode}\n`;
+      if (shippingForMsg.phone) message += `Tel: ${shippingForMsg.phone}\n`;
+      if (shippingForMsg.fullAddress) message += `${shippingForMsg.fullAddress}\n`;
+      message += `\n`;
+    }
+
     const phone = "573207378992";
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
@@ -636,31 +808,51 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // Usuario acepta enviar pedido parcial: guardamos pedido solo con los items pagados
+  // Usuario acepta enviar pedido parcial: pedimos dirección y guardamos pedido parcial
   if (paidItems.length) {
     try {
-      const createRes = await createOrderFromItems(paidItems);
+      const shipping = await showShippingModal();
+      if (!shipping) {
+        const ok = confirm("No ingresaste dirección. ¿Deseas continuar sin dirección?");
+        if (!ok) return;
+      }
+
+      const createRes = await createOrderFromItems(paidItems, shipping || null);
       if (!createRes || !createRes.ok) {
         console.warn("[orders] createOrderFromItems failed (WA partial):", createRes && createRes.error);
-        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
+        _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
       } else {
         console.log("[orders] WA partial order created:", createRes.firebaseKey);
       }
+
+      // preparar mensaje WA
+      let shippingForMsg = null;
+      try { shippingForMsg = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null"); } catch(e){ shippingForMsg = null; }
+
+      let message = "🛒 *Pedido desde Kukoro-shop* (parcial)\n\n";
+      let total = 0;
+      paidItems.forEach(p => {
+        message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
+        total += parsePriceNumber(p.price) * p.qty;
+      });
+      message += `\nTotal: *$${total}*\n\n`;
+      if (shippingForMsg) {
+        message += `📦 *Dirección de envío:*\n`;
+        if (shippingForMsg.addressLine) message += `${shippingForMsg.addressLine}\n`;
+        if (shippingForMsg.city || shippingForMsg.state) message += `${shippingForMsg.city || ""} ${shippingForMsg.state || ""}\n`;
+        if (shippingForMsg.postalCode) message += `CP: ${shippingForMsg.postalCode}\n`;
+        if (shippingForMsg.phone) message += `Tel: ${shippingForMsg.phone}\n`;
+        if (shippingForMsg.fullAddress) message += `${shippingForMsg.fullAddress}\n`;
+        message += `\n`;
+      }
+
+      const phone = "573207378992";
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+      window.open(url, "_blank");
     } catch (e) {
       console.error("Error guardando pedido parcial en Firebase (WA):", e);
       _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
     }
-
-    let message = "🛒 *Pedido desde Kukoro-shop* (parcial)\n\n";
-    let total = 0;
-    paidItems.forEach(p => {
-      message += `• ${p.qty} x ${p.name} - $${p.price}\n`;
-      total += parsePriceNumber(p.price) * p.qty;
-    });
-    message += `\nTotal: *$${total}*\n`;
-    const phone = "573207378992";
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
   }
 
   try { saveCart(); } catch(e){}
@@ -729,24 +921,48 @@ window._openCardPaymentModal = async function() {
       return;
     }
 
-    // 4) Intentar crear pedido en Firebase AHORA (pendiente) - intenta y si falla guardar pending
+    // 4) Pedir dirección de envío antes de crear el pedido pendiente
+    let shipping = null;
+    try {
+      shipping = await showShippingModal();
+      if (!shipping) {
+        const ok = confirm("No ingresaste dirección. ¿Deseas continuar sin dirección?");
+        if (!ok) {
+          // revertir/actualizar stocks locales y abortar
+          await Promise.all(paidItems.map(p => {
+            const mapped = mapToAvailableSheetKey(p.sheetKey) || p.sheetKey;
+            return fetchServerStock(mapped, p.row).then(s => {
+              if (s !== null) applyNewStockToDOM(mapped, p.row, Number(s), getReservedQty);
+            }).catch(()=>{});
+          }));
+          refreshAllCardDisplays();
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("[checkout] shipping modal failed:", e);
+      // seguimos sin shipping
+      shipping = null;
+    }
+
+    // 5) Intentar crear pedido en Firebase AHORA (pendiente) - intenta y si falla guardar pending (incl shipping)
     try {
       console.log("[checkout] creating firebase order (pendiente) for paidItems:", paidItems);
-      const createResNow = await createOrderFromItems(paidItems);
+      const createResNow = await createOrderFromItems(paidItems, shipping || null);
       if (createResNow && createResNow.ok) {
         firebaseKey = createResNow.firebaseKey;
         console.log("[checkout] firebase order created (pending) key:", firebaseKey);
       } else {
         console.warn("[checkout] createOrderFromItems (pending) failed:", createResNow && createResNow.error);
-        _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
+        _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
       }
     } catch (err) {
       console.error("[checkout] createOrderFromItems failed (pending):", err);
-      _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
+      _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
       // continuamos al pago aunque falle la creación: fallback después del pago intentará crear de nuevo
     }
 
-    // 5) Abrir la pasarela de pago — reemplaza openYourPaymentModal por tu integración real
+    // 6) Abrir la pasarela de pago — reemplaza openYourPaymentModal por tu integración real
     const total = updateCartUI();
     let paymentMeta = null;
     try {
@@ -763,28 +979,25 @@ window._openCardPaymentModal = async function() {
       return;
     }
 
-    // 6) Si pago OK -> asegurarse de que exista el pedido en Firebase (si no se creó antes)
+    // 7) Si pago OK -> asegurarse de que exista el pedido en Firebase (si no se creó antes)
     if (paymentMeta && paymentMeta.success) {
       console.log("[checkout] payment success:", paymentMeta);
 
       if (!firebaseKey) {
         try {
           console.log("[checkout] firebaseKey faltante -> crear pedido después del pago");
-          const createResAfter = await createOrderFromItems(paidItems);
+          const createResAfter = await createOrderFromItems(paidItems, shipping || null);
           if (createResAfter && createResAfter.ok) {
             firebaseKey = createResAfter.firebaseKey;
             console.log("[checkout] firebase order created after payment:", firebaseKey);
-            // si había pending guardado, lo removemos
             localStorage.removeItem('wyvern_pending_order');
           } else {
             console.warn("[checkout] createOrderFromItems AFTER payment failed:", createResAfter && createResAfter.error);
-            // guardamos pending con paymentMeta para retry
-            _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now() });
+            _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now() });
           }
         } catch (err) {
           console.error("[checkout] createOrderFromItems AFTER payment EXCEPTION:", err);
-          _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now() });
-          // Aquí podrías notificar al usuario / enviar la info a soporte
+          _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now() });
         }
       } else {
         // marcar pedido como pagado si existe firebaseKey
@@ -792,16 +1005,14 @@ window._openCardPaymentModal = async function() {
           if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
             await window._markOrderAsPaid(firebaseKey, paymentMeta);
           }
-          // si teníamos pending guardado, quitarlo
           localStorage.removeItem('wyvern_pending_order');
         } catch (err) {
           console.warn("[checkout] markOrderAsPaid failed (non-fatal):", err);
-          // guardar pending por si se necesita confirmar el pago/estado
-          _savePendingOrderLocally({ items: paidItems, paymentMeta, createdAt: Date.now(), firebaseKey });
+          _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now(), firebaseKey });
         }
       }
 
-      // 7) eliminar del carrito los items pagados (igual que en WA)
+      // 8) eliminar del carrito los items pagados (igual que en WA)
       if (Array.isArray(result.successes) && result.successes.length > 0) {
         const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
         for (let i = cart.length - 1; i >= 0; i--) {
@@ -831,13 +1042,10 @@ window._openCardPaymentModal = async function() {
 // OPTIONAL: helper que tu pasarela puede llamar si necesita notificar desde otro contexto
 window._onCardPaymentSuccess = async function(paymentMeta = {}) {
   console.log("Pago OK:", paymentMeta);
-  // Si tu gateway notifica el éxito desde otro contexto, puedes procesarlo aquí.
-  // Ejemplo: intentar crear el pedido si quedó pendiente
   try {
     const pendingRaw = localStorage.getItem('wyvern_pending_order');
     if (pendingRaw) {
       const pending = JSON.parse(pendingRaw);
-      // attach paymentMeta then retry
       pending.paymentMeta = paymentMeta;
       localStorage.setItem('wyvern_pending_order', JSON.stringify(pending));
       await _retryPendingOrderIfAny();
@@ -849,9 +1057,8 @@ window._onCardPaymentSuccess = async function(paymentMeta = {}) {
 
 // OPTIONAL: marcar orden como pagada en Firebase (implementa según tu esquema DB)
 window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
-  // Implementa actualización en tu DB: set estado='pagado', guardar transactionId, paidAt, paymentMeta...
-  // Ejemplo (pseudocódigo, sustituye por la función real que actualice tu order):
-  // await updateOrderInDB(firebaseKey, { estado: 'pagado', transactionId: paymentMeta.transactionId, paidAt: new Date().toISOString(), paymentMeta });
+  // Example implementation suggestion:
+  // import { ref, update } from 'firebase/database'; then update orders/{firebaseKey}: { estado:'pagado', paidAt:..., paymentMeta }
   console.log('[orders] markOrderAsPaid (placeholder) for', firebaseKey, paymentMeta);
   return true;
 };
@@ -860,8 +1067,6 @@ window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
 // PLACEHOLDER: implementar tu gateway real aquí (reemplaza esto)
 // -----------------------------
 async function openYourPaymentModal(paymentPayload) {
-  // EJEMPLO SIMULADO (para pruebas locales) — reemplaza por integración real:
-  // return new Promise(resolve => setTimeout(() => resolve({ success: true, transactionId: 'tx123' }), 1000));
   throw new Error("Implementa openYourPaymentModal(paymentPayload) con tu gateway.");
 }
 
@@ -894,7 +1099,4 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
-
-
-
 
