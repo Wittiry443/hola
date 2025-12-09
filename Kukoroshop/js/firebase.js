@@ -16,7 +16,8 @@ import {
   push,
   set,
   update,
-  get
+  get,
+  remove
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 /* ===========================
@@ -38,7 +39,6 @@ const app = initializeApp(firebaseConfig);
 
 // ---------- AUTH ----------
 export const auth = getAuth(app);
-// re-export funciones auth que usas en otros módulos
 export {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -52,43 +52,51 @@ export const db = getDatabase(app);
 
 /**
  * Crea un pedido en /orders y (si hay user.uid) también en /users/{uid}/orders/{orderKey}
- * Devuelve la key (string) del pedido en /orders.
+ * Devuelve { ok: true, key } o { ok: false, error }.
  *
- * Uso: const key = await createOrderInDB(order, auth.currentUser);
+ * Uso:
+ *   const res = await createOrderInDB(orderObj, auth.currentUser);
+ *   if (res.ok) console.log('key', res.key)
  */
 export async function createOrderInDB(order, user) {
   try {
     const now = Date.now();
     const payload = {
       ...order,
+      // normalizamos createdAt a timestamp numérico para consistencia
       createdAt: now,
       uid: user?.uid || null,
       userEmail: user?.email || null
     };
 
+    // 1) push en /orders (índice central)
+    const ordersRef = push(ref(db, "orders"));
+    await set(ordersRef, payload);
+    const key = ordersRef.key;
+
+    // 2) si tenemos usuario, guardar copia en users/{uid}/orders/{key}
     if (user?.uid) {
-      // guardamos el pedido bajo users/{uid}/orders/{key}
-      const newRef = push(ref(db, `users/${user.uid}/orders`));
-      await set(newRef, payload);
-      return { ok: true, key: newRef.key };
-    } else {
-      // si no hay usuario (invitado), puedes guardar en /orders_guest/{key} o en /orders
-      const newRef = push(ref(db, `orders_guest`));
-      await set(newRef, payload);
-      return { ok: true, key: newRef.key };
+      try {
+        await set(ref(db, `users/${user.uid}/orders/${key}`), payload);
+      } catch (e) {
+        // no abortamos si falla la copia en users, pero lo logueamos
+        console.warn("[firebase] createOrderInDB: fallo al escribir users/{uid}/orders copy:", e);
+      }
     }
+
+    return { ok: true, key };
   } catch (err) {
     console.error("createOrderInDB error:", err);
     return { ok: false, error: String(err) };
   }
 }
+
 /**
  * Crea/actualiza el registro público del usuario en /users/{uid}
  * - Guarda email, displayName, lastLogin y role ("admin" si existe /admins/{uid}, "client" por defecto)
  * - Usa update para no borrar children existentes (como orders)
  *
- * Nota de seguridad: role escrito aquí es para UX; no uses role del cliente para reglas de seguridad.
- * Para reglas seguras, usa /admins/{uid} marcado desde servidor o Admin SDK.
+ * Retorna { ok: true } o { ok: false, error }
  */
 export async function ensureUserRecord(user) {
   if (!user || !user.uid) return { ok: false, error: "no_user" };
@@ -96,13 +104,12 @@ export async function ensureUserRecord(user) {
     const uid = user.uid;
     const email = user.email || null;
 
-    // Chequea si existe /admins/{uid} (marcado desde servidor/script)
+    // Chequea si existe /admins/{uid} (marcado desde servidor/Admin SDK)
     let isAdmin = false;
     try {
       const adminSnap = await get(ref(db, `admins/${uid}`));
       isAdmin = adminSnap.exists() && adminSnap.val() === true;
     } catch (e) {
-      // no crítico, solo logueamos
       console.warn("[firebase] ensureUserRecord: error leyendo /admins:", e);
       isAdmin = false;
     }
@@ -124,4 +131,41 @@ export async function ensureUserRecord(user) {
     return { ok: false, error: String(err) };
   }
 }
+
+/**
+ * Opcional: helper para marcar orden como pagada (si lo necesitas).
+ * Actualiza estado y añade metadatos de pago en users/{uid}/orders/{orderKey} y en /orders/{orderKey}
+ */
+export async function markOrderAsPaid(uid, orderKey, paymentMeta = {}) {
+  if (!orderKey) return { ok: false, error: "no_order_key" };
+  try {
+    const updateObj = {
+      estado: "pagado",
+      paidAt: Date.now(),
+      paymentMeta
+    };
+
+    // Intentamos actualizar ambas rutas (si existen)
+    try {
+      await update(ref(db, `orders/${orderKey}`), updateObj);
+    } catch (e) {
+      console.warn("[firebase] markOrderAsPaid: no se pudo actualizar /orders:", e);
+    }
+
+    if (uid) {
+      try {
+        await update(ref(db, `users/${uid}/orders/${orderKey}`), updateObj);
+      } catch (e) {
+        console.warn("[firebase] markOrderAsPaid: no se pudo actualizar users/{uid}/orders:", e);
+      }
+    }
+
+    return { ok: true };
+  } catch (err) {
+    console.error("markOrderAsPaid error:", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+
 
