@@ -221,15 +221,30 @@ export async function mountProductPage() {
     } else {
       reviewsList.innerHTML = "";
       reviews.forEach(r => {
+        // ------------- robust parsing of comment and user -------------
+        // comment field can be named comment, coment, comentario, etc.
+        const rawComment = (r.comment ?? r.coment ?? r.comentario ?? "");
+        const commentTrim = String(rawComment || "").trim();
+        const commentHtml = commentTrim !== "" ? escapeHtml(rawComment) : "<i style='color:#9ca3af'>Sin comentario</i>";
+
+        // user object robustness
+        const userObj = r.user || {};
+        const userLabel = userObj.email || userObj.uid || (typeof userObj === "string" ? userObj : "Usuario");
+
+        // createdAt safety
+        const createdNum = Number(r.createdAt || r.timestamp || 0);
+        const createdTxt = createdNum ? new Date(createdNum).toLocaleDateString() : "";
+
+        // render
         const entry = document.createElement("div");
         entry.className = "review-entry";
         entry.innerHTML = `
           <div style="min-width:100px">
             <div class="review-stars">${renderStars(Number(r.stars||0))}</div>
-            <div class="review-meta">${escapeHtml(r.user?.email || r.user?.uid || "Usuario")} · ${r.createdAt ? new Date(Number(r.createdAt)).toLocaleDateString() : ""}</div>
+            <div class="review-meta">${escapeHtml(String(userLabel))}${createdTxt ? " · " + escapeHtml(createdTxt) : ""}</div>
           </div>
           <div style="flex:1">
-            <div class="review-comment">${r.comment ? escapeHtml(r.comment) : "<i style='color:#9ca3af'>Sin comentario</i>"}</div>
+            <div class="review-comment">${commentHtml}</div>
           </div>
         `;
         reviewsList.appendChild(entry);
