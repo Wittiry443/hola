@@ -10,7 +10,6 @@
 </head>
 
 <body>
-  <!-- HEADER -->
   <header>
     <nav>
       <div class="logo">Kukoro-shop</div>
@@ -18,7 +17,8 @@
       <ul class="nav-links"></ul>
 
       <div class="nav-right">
-        <button id="login-btn" class="login-btn">Iniciar sesión</button>
+        <button id="back-to-shop-btn" class="login-btn">Volver a la tienda</button>
+        
         <span id="user-label" class="user-label"></span>
         <button id="cart-icon-btn" class="cart-icon">Carrito (0)</button>
         <button id="orders-btn" class="cart-icon">Mis pedidos</button>
@@ -26,7 +26,6 @@
     </nav>
   </header>
 
-  <!-- CONTENIDO -->
   <main class="container">
     <h1 class="section-title">Mis pedidos</h1>
 
@@ -41,7 +40,6 @@
     </section>
   </main>
 
-  <!-- FOOTER -->
   <footer class="footer">
     <div class="footer-links">
       <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
@@ -52,7 +50,6 @@
     <p class="footer-copy">© 2025 Kukoro-shop. Todos los derechos reservados.</p>
   </footer>
 
-  <!-- Scripts navegación -->
   <script>
     document.querySelector(".logo")?.addEventListener("click", () => {
       location.href = "index.html";
@@ -60,6 +57,10 @@
 
     document.getElementById("orders-btn").onclick = () =>
       (location.href = "pedidos.html");
+
+    // CAMBIO AQUÍ: Funcionalidad del nuevo botón
+    document.getElementById("back-to-shop-btn").onclick = () => 
+      (location.href = "index.html");
   </script>
 </body>
 </html>
