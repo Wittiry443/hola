@@ -168,11 +168,12 @@ export function renderProducts(products, sheetKey) {
       wrap.appendChild(imgEl);
 
       // Modal con la URL original (igual que en carousel)
-imgEl.addEventListener("click", () => {
-  // navegar a product.html pasando el mismo productKey que usa la tarjeta
-  const pk = card.dataset.productKey || `${card.dataset.sheetKey}::${card.dataset.row}`;
-  location.href = `product.html?pk=${encodeURIComponent(pk)}`;
-});
+      imgEl.addEventListener("click", () => {
+        // navegar a product.html pasando el mismo productKey que usa la tarjeta
+        const pk = card.dataset.productKey || `${card.dataset.sheetKey}::${card.dataset.row}`;
+        location.href = `product.html?pk=${encodeURIComponent(pk)}`;
+      });
+    } // <-- cierre correcto del if(imgUrl)
 
     // -------------------------------------------------------
 
@@ -440,5 +441,3 @@ export function searchProducts() {
 export function loadMore() {
   alert("La opción 'Ver más' aún no está implementada. 😅");
 }
-
-
