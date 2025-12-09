@@ -13,7 +13,7 @@ import { ref, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-dat
 
 const container = document.getElementById("product-page-root") || document.body;
 
-// inyectar estilos mínimos coherentes con el tema (si tu CSS principal ya los cubre, no hace falta)
+// estilos (igual que antes)
 (function injectStyles() {
   if (document.getElementById("product-page-styles")) return;
   const s = document.createElement("style");
@@ -58,7 +58,6 @@ async function fetchProductFromAPI(sheetKey, row) {
     const products = data.products || [];
     const found = products.find(p => String(p.row) === String(row));
     if (found) {
-      // normalize
       if (!found.sheetKey) found.sheetKey = sheetKey;
       found.data = found.data || {};
       return found;
@@ -77,45 +76,57 @@ function normalizeProductEntry(p, sheetKey) {
   const stock = Number(firstKeyValue(d, ["stock","cantidad","Stock"]) || d.Stock || 0);
   const imgUrl = firstKeyValue(d, ["img","Img","imagen","image","url","Imagen"]) || d.Img || "";
   const description = firstKeyValue(d, ["descripcion","Descripcion","description","desc","nota","Nota"]) || d.descripcion || d.Descripcion || "";
-  const sheet = sheetKey || (p.sheetKey || d.Categoria || d.categoria || "UNKNOWN");
+  const sheet = (sheetKey || (p.sheetKey || d.Categoria || d.categoria || "UNKNOWN"));
   const productKey = `${String(sheet).trim().toLowerCase()}::${String(p.row)}`;
   return { row: p.row, sheetKey: sheet, data: d, name, price, stock, imgUrl, description, productKey };
 }
 
-async function resolveProduct(pk) {
-  const parsed = parsePK(pk);
-  if (!parsed) throw new Error("product key inválido");
-  const { sheetKey, row } = parsed;
-
-  // intentar cache local
-  const cache = lastProductsCache || [];
-  let p = cache.find(x => String(x.sheetKey) === String(sheetKey) && String(x.row) === String(row));
-  if (p) return normalizeProductEntry(p, sheetKey);
-
-  // si no está en cache, pedir al API
-  const remote = await fetchProductFromAPI(sheetKey, row);
-  if (remote) {
-    // actualizar cache parcial (opcional)
-    const normalized = { row: remote.row, sheetKey: remote.sheetKey || sheetKey, data: remote.data || {} };
-    setLastProductsCache([...(lastProductsCache || []), normalized]);
-    return normalizeProductEntry(remote, sheetKey);
-  }
-
-  throw new Error("Producto no encontrado");
+// slug helper para fallback (reviewsBySlug)
+function slugify(str) {
+  if (!str) return "";
+  return String(str).toLowerCase()
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // quitar diacríticos
+    .replace(/[^\w\s-]/g, "") // quitar caracteres extraños
+    .trim()
+    .replace(/\s+/g, "-");
 }
 
-// leer reseñas desde Firebase (reviewsByProduct/{productKey})
-async function loadReviews(productKey) {
+// Lee reseñas: intenta reviewsByProduct/{productKey} y luego reviewsBySlug/{slug}
+async function loadReviews(productKey, productName) {
   try {
-    const snap = await get(ref(db, `reviewsByProduct/${productKey}`));
-    if (!snap.exists()) return [];
-    const m = snap.val();
-    // convertir a array ordenado por createdAt desc
-    const arr = Object.keys(m).map(k => ({ id: k, ...m[k] }));
-    arr.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-    return arr;
-  } catch (e) {
-    console.error("loadReviews error", e);
+    console.debug("[reviews] preguntando por productKey:", productKey);
+    // 1) intentamos por productKey
+    const snap1 = await get(ref(db, `reviewsByProduct/${productKey}`));
+    if (snap1.exists()) {
+      const val = snap1.val();
+      console.debug("[reviews] encontrado reviewsByProduct:", Object.keys(val).length);
+      const arr = Object.keys(val).map(k => ({ id: k, ...val[k] }));
+      // normalizar createdAt a número para ordenar
+      arr.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
+      arr.sort((a,b) => b.createdAt - a.createdAt);
+      return arr;
+    }
+
+    // 2) fallback: intentar por slug del nombre (reviewsBySlug)
+    const slug = slugify(productName || productKey);
+    if (slug) {
+      console.debug("[reviews] no había en reviewsByProduct, probando reviewsBySlug:", slug);
+      const snap2 = await get(ref(db, `reviewsBySlug/${slug}`));
+      if (snap2.exists()) {
+        const val2 = snap2.val();
+        const arr2 = Object.keys(val2).map(k => ({ id: k, ...val2[k] }));
+        arr2.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
+        arr2.sort((a,b) => b.createdAt - a.createdAt);
+        return arr2;
+      }
+    }
+
+    // 3) si no hay nada:
+    console.debug("[reviews] no hay reseñas en ninguna ruta para:", productKey, "slug:", slug);
+    return [];
+  } catch (error) {
+    // si hay error de permisos/firebase lo vemos en consola
+    console.error("[reviews] error leyendo reseñas:", error);
     return [];
   }
 }
@@ -158,6 +169,7 @@ export async function mountProductPage() {
       </div>
     </div>`;
 
+    // resolver producto
     const product = await resolveProduct(pk);
 
     // render imagen grande
@@ -178,10 +190,14 @@ export async function mountProductPage() {
     document.getElementById("pp-price").innerText = product.price ? ("$ " + fmtPrice(product.price)) : "-";
     document.getElementById("pp-stock").innerText = `Stock: ${Math.max(0, Number(product.stock || 0))}`;
 
-    // cargar reseñas
+    // cargar reseñas (usa loadReviews que prueba productKey y fallback slug)
     const reviewsList = document.getElementById("pp-reviews-list");
     reviewsList.innerHTML = `<div class="no-reviews">Cargando reseñas...</div>`;
-    const reviews = await loadReviews(product.productKey);
+
+    // log para depuración
+    console.debug("[product-page] productKey:", product.productKey, "productName:", product.name);
+
+    const reviews = await loadReviews(product.productKey, product.name);
 
     if (!reviews || !reviews.length) {
       reviewsList.innerHTML = `<div class="no-reviews">Aún no hay reseñas para este producto.</div>`;
@@ -193,7 +209,7 @@ export async function mountProductPage() {
         entry.innerHTML = `
           <div style="min-width:100px">
             <div class="review-stars">${renderStars(Number(r.stars||0))}</div>
-            <div class="review-meta">${escapeHtml(r.user?.email || r.user?.uid || "Usuario")} · ${new Date(r.createdAt||0).toLocaleDateString()}</div>
+            <div class="review-meta">${escapeHtml(r.user?.email || r.user?.uid || "Usuario")} · ${r.createdAt ? new Date(Number(r.createdAt)).toLocaleDateString() : ""}</div>
           </div>
           <div style="flex:1">
             <div class="review-comment">${r.comment ? escapeHtml(r.comment) : "<i style='color:#9ca3af'>Sin comentario</i>"}</div>
@@ -208,11 +224,31 @@ export async function mountProductPage() {
   }
 }
 
-// Autostart si el script se importa en product.html
+// helpers que ya existían
+async function resolveProduct(pk) {
+  const parsed = parsePK(pk);
+  if (!parsed) throw new Error("product key inválido");
+  const { sheetKey, row } = parsed;
+
+  // intentar cache local
+  const cache = lastProductsCache || [];
+  let p = cache.find(x => String(x.sheetKey) === String(sheetKey) && String(x.row) === String(row));
+  if (p) return normalizeProductEntry(p, sheetKey);
+
+  // si no está en cache, pedir al API
+  const remote = await fetchProductFromAPI(sheetKey, row);
+  if (remote) {
+    const normalized = { row: remote.row, sheetKey: remote.sheetKey || sheetKey, data: remote.data || {} };
+    setLastProductsCache([...(lastProductsCache || []), normalized]);
+    return normalizeProductEntry(remote, sheetKey);
+  }
+
+  throw new Error("Producto no encontrado");
+}
+
+// Autostart
 if (typeof window !== "undefined") {
-  // Esperar DOMContentLoaded para montar en el contenedor
   document.addEventListener("DOMContentLoaded", () => {
-    // Sólo montar si estamos en product.html o si existe el root
     const params = new URLSearchParams(location.search);
     if (params.get("pk")) {
       mountProductPage().catch(e => console.error(e));
