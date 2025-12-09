@@ -1,7 +1,13 @@
 // js/pedidos.js
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { fmtPrice, escapeHtml } from "./utils.js";
-import { ref, onValue, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+import {
+  ref,
+  onValue,
+  get,
+  push,
+  set
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 // UI elements
 const loadingEl = document.getElementById("orders-loading");
@@ -69,9 +75,31 @@ let currentOrdersMap = {};
   background:transparent; border:none; font-size:22px; color:#e5e7eb; cursor:pointer;
 }
 .invoice-small { font-size:12px; color:#9ca3af; }
+
+/* Modal reseñas */
+.review-modal-overlay {
+  position: fixed; inset:0; z-index:100000; display:none; align-items:center; justify-content:center;
+  background: linear-gradient(180deg, rgba(2,6,23,0.7), rgba(2,6,23,0.7));
+  padding:18px;
+}
+.review-modal {
+  width:100%; max-width:760px; max-height:90vh; overflow:auto; border-radius:12px;
+  background: #020617; border:1px solid rgba(148,163,184,0.06); color:#e5e7eb; padding:16px;
+}
+.review-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.review-title { font-size:18px; font-weight:700; color:#e5e7eb; }
+.review-list { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
+.review-item { padding:12px; border-radius:10px; background: rgba(255,255,255,0.02); border:1px solid rgba(148,163,184,0.02); }
+.product-name { font-weight:700; color:#e5e7eb; margin-bottom:8px; }
+.stars { display:inline-flex; gap:6px; align-items:center; }
+.star { font-size:20px; color: rgba(255,255,255,0.25); cursor:pointer; user-select:none; }
+.star.active { color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+.review-comment { width:100%; margin-top:8px; padding:8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid rgba(31,41,55,0.9); display:none; }
+.review-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+.review-save { background: linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; font-weight:700; }
+.review-cancel { background:transparent; border:1px solid rgba(148,163,184,0.06); color:#e5e7eb; padding:8px 12px; border-radius:8px; cursor:pointer; }
 @media (max-width:640px) {
-  .invoice-modal { max-width: 95%; }
-  .invoice-body { padding:12px; max-height: calc(90vh - 160px); }
+  .invoice-modal, .review-modal { max-width:95%; }
 }
   `;
   document.head.appendChild(style);
@@ -89,45 +117,213 @@ let currentOrdersMap = {};
         </div>
       </div>
     </div>
+
+    <div id="review-overlay" class="review-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="review-modal" role="document" aria-labelledby="review-title">
+        <div class="review-header">
+          <div class="review-title" id="review-title">Dejar reseña</div>
+          <div><button id="review-close-btn" class="btn-close-invoice" aria-label="Cerrar reseñas">&times;</button></div>
+        </div>
+        <div id="review-body" class="review-list" tabindex="0"></div>
+        <div class="review-actions" style="margin-top:12px">
+          <button id="review-cancel-btn" class="review-cancel">Cancelar</button>
+          <button id="review-save-btn" class="review-save">Guardar reseñas</button>
+        </div>
+      </div>
+    </div>
   `;
   document.body.insertAdjacentHTML("beforeend", modalHTML);
 
-  const overlay = document.getElementById("invoice-overlay");
+  const invoiceOverlay = document.getElementById("invoice-overlay");
   const closeBtn = document.getElementById("close-invoice-btn");
   const printBtn = document.getElementById("print-invoice-btn");
 
-  function closeModal() {
-    if (!overlay) return;
-    overlay.style.display = "none";
-    overlay.setAttribute("aria-hidden", "true");
+  function closeInvoice() {
+    if (!invoiceOverlay) return;
+    invoiceOverlay.style.display = "none";
+    invoiceOverlay.setAttribute("aria-hidden", "true");
     document.documentElement.style.overflow = "";
-    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keydown", invoiceKeyHandler);
   }
-  function onKeyDown(e) { if (e.key === "Escape") closeModal(); }
-
-  if (closeBtn) closeBtn.addEventListener("click", closeModal);
-  if (overlay) {
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
-  }
+  function invoiceKeyHandler(e) { if (e.key === "Escape") closeInvoice(); }
+  if (closeBtn) closeBtn.addEventListener("click", closeInvoice);
+  if (invoiceOverlay) invoiceOverlay.addEventListener("click", (e) => { if (e.target === invoiceOverlay) closeInvoice(); });
   if (printBtn) printBtn.addEventListener("click", () => window.print());
 
-  // helpers para abrir/cerrar desde showInvoiceDetails
   window.__showInvoiceOverlay = function() {
-    if (!overlay) return;
-    overlay.style.display = "flex";
-    overlay.setAttribute("aria-hidden", "false");
+    if (!invoiceOverlay) return;
+    invoiceOverlay.style.display = "flex";
+    invoiceOverlay.setAttribute("aria-hidden", "false");
     document.documentElement.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-    // focus contenido para accesibilidad
-    const content = document.getElementById("invoice-content");
-    if (content) content.focus();
+    window.addEventListener("keydown", invoiceKeyHandler);
+    const content = document.getElementById("invoice-content"); if (content) content.focus();
   };
-  window.__hideInvoiceOverlay = closeModal;
+  window.__hideInvoiceOverlay = closeInvoice;
+
+  // Reviews modal handlers
+  const reviewOverlay = document.getElementById("review-overlay");
+  const reviewBody = document.getElementById("review-body");
+  const reviewClose = document.getElementById("review-close-btn");
+  const reviewCancel = document.getElementById("review-cancel-btn");
+  const reviewSave = document.getElementById("review-save-btn");
+
+  function closeReviewModal() {
+    if (!reviewOverlay) return;
+    reviewOverlay.style.display = "none";
+    reviewOverlay.setAttribute("aria-hidden", "true");
+    document.documentElement.style.overflow = "";
+    reviewBody.innerHTML = "";
+    window.removeEventListener("keydown", reviewKeyHandler);
+  }
+  function reviewKeyHandler(e) { if (e.key === "Escape") closeReviewModal(); }
+
+  if (reviewClose) reviewClose.addEventListener("click", closeReviewModal);
+  if (reviewCancel) reviewCancel.addEventListener("click", closeReviewModal);
+  if (reviewOverlay) reviewOverlay.addEventListener("click", (e) => { if (e.target === reviewOverlay) closeReviewModal(); });
+
+  // Save handler (collected reviews)
+  if (reviewSave) {
+    reviewSave.addEventListener("click", async () => {
+      try {
+        reviewSave.disabled = true;
+        const items = Array.from(reviewBody.querySelectorAll(".review-item"));
+        const reviewsToSave = items.map(node => {
+          const productName = node.dataset.productName;
+          const productKey = node.dataset.productKey || null;
+          const stars = Number(node.dataset.selectedStars || 0);
+          const commentEl = node.querySelector(".review-comment");
+          const comment = commentEl ? commentEl.value.trim() : "";
+          return { productName, productKey, stars, comment };
+        }).filter(r => r.stars > 0 || (r.comment && r.comment.length > 0));
+
+        if (!reviewsToSave.length) {
+          alert("No has dejado ninguna reseña. Selecciona al menos 1 estrella o escribe un comentario.");
+          reviewSave.disabled = false;
+          return;
+        }
+
+        // obtener usuario
+        const user = auth.currentUser || null;
+        const userMeta = { uid: user?.uid || null, email: user?.email || null };
+        const now = Date.now();
+        const orderKey = reviewBody.dataset.orderKey || null;
+
+        // guardar cada reseña en DB: preferir reviewsByProduct/{productKey} si existe, sino reviewsBySlug/{slug}
+        const results = [];
+        for (const r of reviewsToSave) {
+          const slug = slugify(r.productName);
+          const payload = {
+            productKey: r.productKey || null,
+            productSlug: slug,
+            productName: r.productName,
+            stars: Number(r.stars || 0),
+            comment: r.comment || "",
+            user: userMeta,
+            orderKey: orderKey,
+            createdAt: now
+          };
+
+          if (r.productKey) {
+            const path = `reviewsByProduct/${r.productKey}`;
+            const nodeRef = await push(ref(db, path));
+            await set(nodeRef, payload);
+            results.push({ ok: true, path, key: nodeRef.key });
+          } else {
+            const path = `reviewsBySlug/${slug}`;
+            const nodeRef = await push(ref(db, path));
+            await set(nodeRef, payload);
+            results.push({ ok: true, path, key: nodeRef.key });
+          }
+        }
+
+        alert("Reseñas guardadas. ¡Gracias!");
+        closeReviewModal();
+      } catch (err) {
+        console.error("Error guardando reseñas:", err);
+        alert("Error guardando reseñas. Revisa la consola.");
+      } finally {
+        reviewSave.disabled = false;
+      }
+    });
+  }
+
+  // Expose helper to open review modal with items
+  window.__openReviewModal = function(orderKey, products) {
+    if (!reviewOverlay || !reviewBody) return;
+    reviewBody.innerHTML = "";
+    reviewBody.dataset.orderKey = orderKey || null;
+
+    // Build UI rows
+    products.forEach(p => {
+      const keyAttr = p.productKey ? `data-product-key="${escapeHtml(p.productKey)}"` : "";
+      const node = document.createElement("div");
+      node.className = "review-item";
+      node.dataset.productName = p.name;
+      if (p.productKey) node.dataset.productKey = p.productKey;
+      node.dataset.selectedStars = "0";
+
+      const starsHtml = Array.from({length:5}).map((_, i) =>
+        `<span class="star" data-star="${i+1}" title="${i+1} estrella(s)">★</span>`
+      ).join("");
+
+      node.innerHTML = `
+        <div class="product-name">${escapeHtml(p.name)}</div>
+        <div class="stars">${starsHtml}</div>
+        <textarea class="review-comment" placeholder="Escribe un comentario opcional..." rows="3"></textarea>
+      `;
+      reviewBody.appendChild(node);
+
+      // wiring stars
+      const starEls = node.querySelectorAll(".star");
+      starEls.forEach(s => {
+        s.addEventListener("click", () => {
+          const n = Number(s.dataset.star || 0);
+          node.dataset.selectedStars = String(n);
+          // update UI
+          starEls.forEach(se => {
+            const val = Number(se.dataset.star || 0);
+            if (val <= n) se.classList.add("active"); else se.classList.remove("active");
+          });
+          // show textarea when at least 1 star
+          const ta = node.querySelector(".review-comment");
+          if (ta) ta.style.display = (n > 0) ? "block" : "none";
+        });
+      });
+
+      // if product comes with preselected rating (optional), apply
+      if (p.preStars && Number(p.preStars) > 0) {
+        const n = Number(p.preStars);
+        node.dataset.selectedStars = String(n);
+        node.querySelectorAll(".star").forEach(se => {
+          const val = Number(se.dataset.star || 0);
+          if (val <= n) se.classList.add("active"); else se.classList.remove("active");
+        });
+        const ta = node.querySelector(".review-comment");
+        if (ta) ta.style.display = "block";
+      }
+    });
+
+    // show overlay
+    reviewOverlay.style.display = "flex";
+    reviewOverlay.setAttribute("aria-hidden", "false");
+    document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", reviewKeyHandler);
+    const first = reviewBody.querySelector(".star");
+    if (first) first.focus();
+  };
+
+  // small slug helper used by save
+  function slugify(s) {
+    return String(s || "").toLowerCase().trim()
+      .replace(/[^a-z0-9\u00C0-\u017F -]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+  }
 })();
 
 // Verificar elementos necesarios
 if (!loadingEl || !listEl) {
-  // no hacemos throw, solo evitamos fallos posteriores
+  // silencioso: permitimos que la página cargue sin errores
 }
 
 // manejadores opcionales
@@ -215,7 +411,7 @@ function renderOrdersObject(obj) {
     const idPedido = order.idPedido || key;
     const cliente  = order.cliente || order.userEmail || "Sin cliente";
     const resumen  = order.resumen || summarizeOrder(order) || "Sin resumen";
-    const estado   = order.estado || order.status || "pendiente";
+    const estado   = (order.estado || order.status || "pendiente").toString();
     const total    = Number(order.total || 0);
 
     const createdTxt = order.createdAt
@@ -225,6 +421,9 @@ function renderOrdersObject(obj) {
     const article = document.createElement("article");
     article.className = "order-card";
     article.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
+    // "Dejar reseña" only if estado is 'entregado' (case-insensitive)
+    const isEntregado = String(estado).toLowerCase() === "entregado";
+
     article.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
@@ -241,6 +440,7 @@ function renderOrdersObject(obj) {
       <div style="margin-top:10px;color:#cbd5e1;font-size:14px;">${escapeHtml(resumen)}</div>
       <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;">
         <button class="btn-view-invoice" data-order-key="${escapeHtml(String(key))}" style="background-color:rgba(255,255,255,0.95);border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:#111">📄 Ver Factura</button>
+        ${isEntregado ? `<button class="btn-leave-review" data-order-key="${escapeHtml(String(key))}" style="margin-left:8px;background:transparent;border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;color:#e5e7eb;cursor:pointer">⭐ Dejar reseña</button>` : ''}
       </div>
     `;
     frag.appendChild(article);
@@ -248,17 +448,67 @@ function renderOrdersObject(obj) {
 
   listEl.appendChild(frag);
 
-  // delegación: un solo handler para todos los botones "Ver Factura"
+  // delegación: un solo handler para todos los botones "Ver Factura" y "Dejar reseña"
   listEl.onclick = (e) => {
-    const btn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
+    const btn = e.target.closest ? e.target.closest(".btn-view-invoice, .btn-leave-review") : null;
     if (!btn) return;
     const orderKey = btn.dataset.orderKey;
     if (!orderKey) return;
     const order = currentOrdersMap[orderKey];
     if (!order) return;
-    const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
-    showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
+
+    if (btn.classList.contains("btn-view-invoice")) {
+      const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
+      showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
+      return;
+    }
+
+    if (btn.classList.contains("btn-leave-review")) {
+      // build products list for review modal
+      const products = buildProductsForReview(order);
+      // open modal
+      window.__openReviewModal(orderKey, products);
+      return;
+    }
   };
+}
+
+// Construye array de productos { name, qty, productKey? } desde order.items / cart / resumen
+function buildProductsForReview(order) {
+  let rawItems = Array.isArray(order.items) ? order.items
+               : (Array.isArray(order.cart) ? order.cart : []);
+
+  const products = [];
+
+  if (rawItems && rawItems.length) {
+    rawItems.forEach(it => {
+      const name = it.nombre || it.name || it.title || "Producto";
+      const qty = (it.cantidad !== undefined) ? Number(it.cantidad) : (it.qty !== undefined ? Number(it.qty) : (it.quantity !== undefined ? Number(it.quantity) : 1));
+      // if sheetKey & row exist in item, create productKey
+      const sheetKey = it.sheetKey || it.sheet || it.sheet_key || null;
+      const row = it.row || it.rowId || it.r || null;
+      const productKey = (sheetKey && row) ? `${sheetKey}::${row}` : (it.id ? String(it.id) : null);
+      products.push({ name: String(name), qty: Number(qty || 1), productKey: productKey || null });
+    });
+    return products;
+  }
+
+  // fallback: parse resumen "1 x Nombre | 2 x Otro"
+  if (order.resumen) {
+    const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
+    parts.forEach(p => {
+      const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
+      if (m) {
+        products.push({ name: m[2].trim(), qty: Number(m[1]), productKey: null });
+      } else {
+        products.push({ name: p.trim(), qty: 1, productKey: null });
+      }
+    });
+    return products;
+  }
+
+  // no items
+  return [];
 }
 
 // Mostrar modal con detalles (items normalizados + fallback resumen)
