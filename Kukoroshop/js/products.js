@@ -266,7 +266,7 @@ function renderTabs(sheets) {
 
   const allBtn = document.createElement("button");
   allBtn.className = "tab active";
-  allBtn.innerText = "✨ Todos";
+  allBtn.innerText = "Todos";
   allBtn.onclick = () => {
     document
       .querySelectorAll(".tab")
@@ -436,3 +436,4 @@ export function searchProducts() {
 export function loadMore() {
   alert("La opción 'Ver más' aún no está implementada. 😅");
 }
+
