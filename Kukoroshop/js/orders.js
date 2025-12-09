@@ -10,136 +10,149 @@ const userLabel = document.getElementById("user-label");
 const cartBtn = document.getElementById("cart-icon-btn");
 const adminBtn = document.getElementById("admin-panel-btn");
 
-// Estado local: mapa de pedidos renderizados (clave -> order)
+// Mapa local de pedidos cargados (key -> order)
 let currentOrdersMap = {};
 
-// ====== setup UI / modal de factura ======
+// ====== setup UI / modal de factura (inyecta estilos centralizados) ======
 (function setupInvoiceUI() {
-  // evitar duplicados en hot-reload
-  if (document.getElementById('invoice-overlay')) return;
+  if (document.getElementById("invoice-overlay")) return;
 
-  const style = document.createElement('style');
+  const style = document.createElement("style");
+  style.id = "invoice-styles";
   style.innerHTML = `
-    .invoice-modal-overlay {
-      position: fixed; inset: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6); z-index: 99999; display: none;
-      justify-content: center; align-items: center; padding: 20px;
-    }
-    .invoice-modal { background: white; width: 100%; max-width: 720px; max-height: 90vh;
-      border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-      overflow: hidden;
-    }
-    .invoice-header { padding: 16px 20px; background: #f8f9fa; border-bottom: 1px solid #eee; display:flex;justify-content:space-between;align-items:center;}
-    .invoice-body { padding: 18px; overflow-y:auto; max-height:calc(90vh - 160px); }
-    .invoice-footer { padding: 12px 18px; border-top:1px solid #eee; text-align:right; background:#fff; }
-    .invoice-items-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
-    .invoice-items-table th{ text-align:left; border-bottom:2px solid #eee; padding:8px; color:#666; }
-    .invoice-items-table td{ border-bottom:1px solid #eee; padding:8px; vertical-align:top; }
-    .btn-close-invoice { background:none; border:none; font-size:24px; cursor:pointer; color:#555; }
-    .btn-invoice-action { background:#111; color:#fff; padding:8px 14px; border-radius:8px; border:none; cursor:pointer; }
+/* Modal factura: armonizado con styles.css (tema oscuro) */
+.invoice-modal-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  display: none; justify-content: center; align-items: center;
+  background: linear-gradient(180deg, rgba(2,6,23,0.8), rgba(2,6,23,0.8));
+  padding: 20px;
+}
+.invoice-modal {
+  width: 100%; max-width: 760px; max-height: 90vh;
+  border-radius: 12px; display:flex; flex-direction:column;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(37,99,235,0.04), transparent 55%),
+    radial-gradient(circle at 80% 100%, rgba(168,85,247,0.02), transparent 60%),
+    #020617;
+  border: 1px solid rgba(148,163,184,0.06);
+  box-shadow: 0 20px 60px rgba(2,6,23,0.9);
+  color: #e5e7eb;
+  font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.invoice-header {
+  padding: 14px 18px; display:flex; justify-content:space-between; align-items:center;
+  background: rgba(15,23,42,0.95); border-bottom: 1px solid rgba(148,163,184,0.03);
+}
+.invoice-header h3 { margin:0; font-size:18px; color:#e5e7eb; }
+.invoice-body {
+  padding: 16px 18px; overflow-y:auto; max-height: calc(90vh - 170px);
+  color: #d1d5db; font-size:14px; line-height:1.45;
+}
+.invoice-items-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+.invoice-items-table th {
+  text-align:left; padding:8px; color:#9ca3af; font-weight:700;
+  border-bottom: 1px solid rgba(148,163,184,0.03);
+}
+.invoice-items-table td {
+  padding:10px 8px; color:#e9e9eb; border-bottom: 1px solid rgba(148,163,184,0.01);
+}
+.invoice-footer {
+  padding: 12px 18px; border-top: 1px solid rgba(148,163,184,0.03); text-align:right;
+  background: transparent;
+}
+.btn-invoice-action {
+  background: linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:8px 14px;
+  border-radius:8px; border:none; cursor:pointer; font-weight:700;
+}
+.btn-close-invoice {
+  background:transparent; border:none; font-size:22px; color:#e5e7eb; cursor:pointer;
+}
+.invoice-small { font-size:12px; color:#9ca3af; }
+@media (max-width:640px) {
+  .invoice-modal { max-width: 95%; }
+  .invoice-body { padding:12px; max-height: calc(90vh - 160px); }
+}
   `;
   document.head.appendChild(style);
 
   const modalHTML = `
     <div id="invoice-overlay" class="invoice-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="invoice-modal" role="document">
+      <div class="invoice-modal" role="document" aria-labelledby="invoice-title">
         <div class="invoice-header">
-          <h3 style="margin:0;font-size:18px">Detalle de Factura</h3>
-          <div>
-            <button id="close-invoice-btn" class="btn-close-invoice" aria-label="Cerrar factura">&times;</button>
-          </div>
+          <h3 id="invoice-title">Detalle de Factura</h3>
+          <div><button id="close-invoice-btn" class="btn-close-invoice" aria-label="Cerrar">&times;</button></div>
         </div>
-        <div id="invoice-content" class="invoice-body"></div>
+        <div id="invoice-content" class="invoice-body" tabindex="0"></div>
         <div class="invoice-footer">
           <button id="print-invoice-btn" class="btn-invoice-action">Imprimir / Guardar PDF</button>
         </div>
       </div>
     </div>
   `;
-  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  document.body.insertAdjacentHTML("beforeend", modalHTML);
 
-  const overlay = document.getElementById('invoice-overlay');
-  const closeBtn = document.getElementById('close-invoice-btn');
-  const printBtn = document.getElementById('print-invoice-btn');
+  const overlay = document.getElementById("invoice-overlay");
+  const closeBtn = document.getElementById("close-invoice-btn");
+  const printBtn = document.getElementById("print-invoice-btn");
 
-  // handler ESC (declarado aquí para poder añadir y remover)
-  function handleEsc(ev) {
-    if (ev.key === 'Escape') {
-      overlay.style.display = 'none';
-      overlay.setAttribute('aria-hidden', 'true');
-      document.documentElement.style.overflow = '';
-      window.removeEventListener('keydown', handleEsc);
-    }
+  function closeModal() {
+    if (!overlay) return;
+    overlay.style.display = "none";
+    overlay.setAttribute("aria-hidden", "true");
+    document.documentElement.style.overflow = "";
+    window.removeEventListener("keydown", onKeyDown);
   }
+  function onKeyDown(e) { if (e.key === "Escape") closeModal(); }
 
-  if (closeBtn) closeBtn.addEventListener('click', () => {
-    overlay.style.display = 'none';
-    overlay.setAttribute('aria-hidden', 'true');
-    document.documentElement.style.overflow = '';
-    window.removeEventListener('keydown', handleEsc);
-  });
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+  if (overlay) {
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  }
+  if (printBtn) printBtn.addEventListener("click", () => window.print());
 
-  // click fuera para cerrar
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      overlay.style.display = 'none';
-      overlay.setAttribute('aria-hidden', 'true');
-      document.documentElement.style.overflow = '';
-      window.removeEventListener('keydown', handleEsc);
-    }
-  });
-
-  // print
-  if (printBtn) printBtn.addEventListener('click', () => window.print());
-
-  // expose helper to open modal from other functions
+  // helpers para abrir/cerrar desde showInvoiceDetails
   window.__showInvoiceOverlay = function() {
-    overlay.style.display = 'flex';
-    overlay.setAttribute('aria-hidden', 'false');
-    document.documentElement.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleEsc);
+    if (!overlay) return;
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden", "false");
+    document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    // focus contenido para accesibilidad
+    const content = document.getElementById("invoice-content");
+    if (content) content.focus();
   };
-
-  window.__hideInvoiceOverlay = function() {
-    overlay.style.display = 'none';
-    overlay.setAttribute('aria-hidden', 'true');
-    document.documentElement.style.overflow = '';
-    window.removeEventListener('keydown', handleEsc);
-  };
+  window.__hideInvoiceOverlay = closeModal;
 })();
 
-// Safety: ensure required nodes exist
+// Verificar elementos necesarios
 if (!loadingEl || !listEl) {
-  console.warn("Elementos de UI de pedidos no encontrados.");
+  // no hacemos throw, solo evitamos fallos posteriores
 }
 
-// Optional handlers
+// manejadores opcionales
 cartBtn?.addEventListener("click", () => { /* abrir carrito */ });
 adminBtn?.addEventListener("click", () => location.href = "admin.html");
 
-// Escuchar estado de autenticación
+// Escuchar estado auth
 onAuthStateChanged(auth, async (user) => {
   if (!user) return window.location.href = "index.html";
-
   if (userLabel) userLabel.textContent = user.email || "";
-
-  try { await auth.currentUser.getIdToken(true); } catch (err) { console.warn("No se pudo refrescar token:", err); }
-
+  try { await auth.currentUser.getIdToken(true); } catch (e) { /* no crítico */ }
   listenUserOrders(user.uid, user.email || "");
 });
 
-// Obtener info actual del usuario
+// obtener info del usuario actual
 function getCurrentUserInfo() {
   const u = auth.currentUser;
   if (!u) return { uid: null, email: null, displayName: null };
   return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
 }
 
-// Escuchar y cargar pedidos del usuario (con fallback)
+// Escuchar pedidos del usuario con fallback a /orders
 function listenUserOrders(uid, email) {
-  loadingEl && (loadingEl.style.display = "block");
-  listEl && (listEl.style.display = "none");
-  if (listEl) listEl.innerHTML = "";
+  if (loadingEl) loadingEl.style.display = "block";
+  if (listEl) { listEl.style.display = "none"; listEl.innerHTML = ""; }
 
   const userOrdersRef = ref(db, `users/${uid}/orders`);
 
@@ -151,7 +164,7 @@ function listenUserOrders(uid, email) {
         return;
       }
 
-      // Fallback a /orders y filtrar por uid o email
+      // fallback a /orders
       const ordersRef = ref(db, "orders");
       const ordersSnap = await get(ordersRef);
       const all = ordersSnap.val() || {};
@@ -166,28 +179,23 @@ function listenUserOrders(uid, email) {
         })
       );
 
-      if (Object.keys(filtered).length) {
-        renderOrdersObject(filtered);
-      } else {
-        renderEmpty();
-      }
+      if (Object.keys(filtered).length) renderOrdersObject(filtered);
+      else renderEmpty();
     } catch (err) {
       const ctx = getCurrentUserInfo();
-      console.error("Error leyendo orders (fallback):", err, "requesting user:", ctx);
       renderError(err, ctx);
     }
   }, (err) => {
     const ctx = getCurrentUserInfo();
-    console.error("Error listening user orders:", err, "requesting user:", ctx);
     renderError(err, ctx);
   });
 }
 
-// Renderiza pedidos (y guarda en currentOrdersMap)
+// Renderizar pedidos en lista (y construir mapa local)
 function renderOrdersObject(obj) {
-  currentOrdersMap = {}; // reset
-  loadingEl && (loadingEl.style.display = "none");
-  listEl && (listEl.style.display = "block");
+  currentOrdersMap = {};
+  if (loadingEl) loadingEl.style.display = "none";
+  if (listEl) listEl.style.display = "block";
   if (!listEl) return;
 
   const entries = Object.entries(obj).sort((a, b) => {
@@ -196,12 +204,10 @@ function renderOrdersObject(obj) {
     return tb - ta;
   });
 
-  if (!entries.length) {
-    return renderEmpty();
-  }
+  if (!entries.length) return renderEmpty();
 
   listEl.innerHTML = "";
-  const fragment = document.createDocumentFragment();
+  const frag = document.createDocumentFragment();
 
   entries.forEach(([key, order]) => {
     currentOrdersMap[key] = order;
@@ -212,204 +218,198 @@ function renderOrdersObject(obj) {
     const estado   = order.estado || order.status || "pendiente";
     const total    = Number(order.total || 0);
 
-    const createdAt = order.createdAt ? new Date(order.createdAt) : null;
-    const createdTxt = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleString() : (typeof order.createdAt === 'number' ? new Date(order.createdAt).toLocaleString() : "—");
+    const createdTxt = order.createdAt
+      ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString())
+      : "—";
 
-    // botón con data-order-key
-    const item = document.createElement('article');
-    item.className = "order-card";
-    item.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
-    item.innerHTML = `
+    const article = document.createElement("article");
+    article.className = "order-card";
+    article.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
+    article.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="font-weight:600">Pedido: ${escapeHtml(String(idPedido))}</div>
-          <div style="color:#666;font-size:13px;margin-top:4px">Fecha: ${escapeHtml(createdTxt)} · Cliente: ${escapeHtml(cliente)}</div>
+          <div style="color:#9ca3af;font-size:13px;margin-top:4px">Fecha: ${escapeHtml(createdTxt)} · Cliente: ${escapeHtml(cliente)}</div>
         </div>
         <div style="text-align:right">
           <div style="font-weight:700">${fmtPrice(total)}</div>
           <div style="margin-top:6px">
-            <span class="estado" style="padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:12px;">${escapeHtml(estado)}</span>
+            <span class="estado" style="padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.06);font-size:12px;color:#e9e9eb">${escapeHtml(estado)}</span>
           </div>
         </div>
       </div>
-      <div style="margin-top:10px;color:#444;font-size:14px;">${escapeHtml(resumen)}</div>
-      <div style="margin-top:12px; border-top:1px solid #eee; padding-top:8px; text-align:right;">
-        <button class="btn-view-invoice" data-order-key="${key}" style="background-color:#fff;border:1px solid #ccc;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;">📄 Ver Factura</button>
+      <div style="margin-top:10px;color:#cbd5e1;font-size:14px;">${escapeHtml(resumen)}</div>
+      <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;">
+        <button class="btn-view-invoice" data-order-key="${escapeHtml(String(key))}" style="background-color:rgba(255,255,255,0.95);border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:#111">📄 Ver Factura</button>
       </div>
     `;
-    fragment.appendChild(item);
+    frag.appendChild(article);
   });
 
-  listEl.appendChild(fragment);
+  listEl.appendChild(frag);
 
-  // Delegación: evento para botones "Ver Factura"
+  // delegación: un solo handler para todos los botones "Ver Factura"
   listEl.onclick = (e) => {
-    const btn = e.target.closest && e.target.closest('.btn-view-invoice');
+    const btn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
     if (!btn) return;
     const orderKey = btn.dataset.orderKey;
+    if (!orderKey) return;
     const order = currentOrdersMap[orderKey];
-    if (!order) {
-      console.error("Pedido no encontrado en mapa local para key:", orderKey);
-      return;
-    }
-    // uso createdAt para mostrar fecha legible
+    if (!order) return;
     const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
     showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
   };
 }
 
-// Mostrar modal con detalles (robusta)
-// Mostrar modal con detalles (parsea resumen si no hay items individuales)
-// Reemplaza tu showInvoiceDetails por esta versión
+// Mostrar modal con detalles (items normalizados + fallback resumen)
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
-  try {
-    if (!order || typeof order !== "object") return;
+  if (!order || typeof order !== "object") return;
+  const overlay = document.getElementById("invoice-overlay");
+  const contentEl = document.getElementById("invoice-content");
+  if (!overlay || !contentEl) return;
 
-    const overlay = document.getElementById("invoice-overlay");
-    const contentEl = document.getElementById("invoice-content");
-    if (!overlay || !contentEl) return;
+  // Items: preferir order.items / order.cart
+  let rawItems = Array.isArray(order.items) ? order.items
+               : (Array.isArray(order.cart) ? order.cart : []);
 
-    // Obtener array de items (soporta order.items o order.cart)
-    const rawItems = Array.isArray(order.items)
-      ? order.items
-      : (Array.isArray(order.cart) ? order.cart : []);
+  // Normalizar items si existen
+  const itemsToRender = (rawItems || []).map(it => {
+    const name = it.nombre || it.name || it.title || "Producto";
+    const qtyRaw = (it.cantidad !== undefined) ? it.cantidad : (it.qty !== undefined ? it.qty : (it.quantity !== undefined ? it.quantity : null));
+    const qty = (qtyRaw === null || qtyRaw === "" || isNaN(Number(qtyRaw))) ? null : Number(qtyRaw);
+    const priceRaw = (it.precioUnitario !== undefined) ? it.precioUnitario : (it.precioUnitaria !== undefined ? it.precioUnitaria : (it.price !== undefined ? it.price : null));
+    const price = (priceRaw === null || priceRaw === "" || isNaN(Number(priceRaw))) ? null : Number(priceRaw);
+    return { name: String(name), qty, price, raw: it };
+  });
 
-    // Normalizar cada item a { name, qty, price }
-    const itemsToRender = rawItems.map(it => {
-      const name = it.nombre || it.name || it.title || "Producto";
-      // pueden venir como 'cantidad', 'qty' o 'quantity'
-      const qtyRaw = (it.cantidad !== undefined) ? it.cantidad : (it.qty !== undefined ? it.qty : (it.quantity !== undefined ? it.quantity : null));
-      const qty = (qtyRaw === null || qtyRaw === "" || isNaN(Number(qtyRaw))) ? null : Number(qtyRaw);
+  let itemsHtml = "";
 
-      // precio puede estar en 'precioUnitario' (tu caso), o 'precioUnitario' numérico, o 'price'
-      const priceRaw = (it.precioUnitario !== undefined) ? it.precioUnitario : (it.precioUnitaria !== undefined ? it.precioUnitaria : (it.price !== undefined ? it.price : null));
-      const price = (priceRaw === null || priceRaw === "" || isNaN(Number(priceRaw))) ? null : Number(priceRaw);
+  if (itemsToRender.length) {
+    const rows = itemsToRender.map(it => {
+      const nm = escapeHtml(it.name);
+      const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
+      const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
+      const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
 
-      return { name: String(name), qty, price, raw: it };
-    });
-
-    // Construir filas HTML
-    let itemsHtml = "";
-    if (itemsToRender.length) {
-      // dentro de showInvoiceDetails, cuando creas las filas:
-const rows = itemsToRender.map(it => {
-  const nm = escapeHtml(it.name);
-  const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
-  const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
-  const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
-
-  const refTxt = (it.raw && (it.raw.id || it.raw.row || it.raw.sku || it.raw.ref))
-    ? escapeHtml(it.raw.id || it.raw.row || it.raw.sku || it.raw.ref)
-    : null;
-
-  return `
-    <tr>
-      <td>
-        <strong>${nm}</strong>
-        ${refTxt ? `<div style="font-size:12px;color:#888">Ref: ${refTxt}</div>` : ""}
-      </td>
-      <td style="text-align:center;">${qtyTxt}</td>
-      <td style="text-align:right;">${priceTxt}</td>
-      <td style="text-align:right;">${lineTotalTxt}</td>
-    </tr>
-  `;
-}).join("");
-      itemsHtml = `
-        <table class="invoice-items-table">
-          <thead>
-            <tr>
-              <th style="width:60%">Producto</th>
-              <th style="text-align:center;">Cant.</th>
-              <th style="text-align:right;">Precio</th>
-              <th style="text-align:right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      `;
-    } else if (order.resumen) {
-      // fallback: parsear resumen si no hay array items
-      const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
-      const rows = parts.map(p => {
-        const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
-        if (m) {
-          return `<tr><td><strong>${escapeHtml(m[2].trim())}</strong></td><td style="text-align:center;">${escapeHtml(m[1])}</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+      // ref: solo mostrar si existe y no es '-'/'null'/'undefined'/''
+      let refCandidate = null;
+      if (it.raw) {
+        const possible = it.raw.id || it.raw.row || it.raw.sku || it.raw.ref;
+        if (possible !== undefined && possible !== null) {
+          const s = String(possible).trim();
+          if (s !== "" && s !== "-" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined") {
+            refCandidate = s;
+          }
         }
-        return `<tr><td><strong>${escapeHtml(p)}</strong></td><td style="text-align:center;">—</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
-      }).join("");
-      itemsHtml = `
-        <table class="invoice-items-table">
-          <thead>
-            <tr>
-              <th style="width:60%">Producto</th>
-              <th style="text-align:center;">Cant.</th>
-              <th style="text-align:right;">Precio</th>
-              <th style="text-align:right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+      }
+
+      return `
+        <tr>
+          <td>
+            <strong>${nm}</strong>
+            ${refCandidate ? `<div class="invoice-small" style="margin-top:6px">Ref: ${escapeHtml(refCandidate)}</div>` : ""}
+          </td>
+          <td style="text-align:center;">${qtyTxt}</td>
+          <td style="text-align:right;">${priceTxt}</td>
+          <td style="text-align:right;">${lineTotalTxt}</td>
+        </tr>
       `;
-    } else {
-      itemsHtml = `<div style="text-align:center;padding:18px;color:#777">No hay detalle de items.</div>`;
-    }
+    }).join("");
 
-    // Cliente / totales
-    const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente");
-    const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || "No especificada");
-    const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || "—");
-    const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
-    const total = Number(order.total || 0);
-    const subtotal = (Number(order.subtotal) || (shippingCost > 0 ? (total - shippingCost) : total)) || 0;
-
-    const html = `
-      <div style="margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px;">
-        <h4 style="margin:0 0 6px 0;color:#222">Kukoro-shop</h4>
-        <div style="font-size:13px;color:#666">Confirmación de Orden</div>
-      </div>
-
-      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px;">
-        <div style="flex:1;min-width:180px;">
-          <strong style="display:block;margin-bottom:6px;color:#333">Facturar a:</strong>
-          <div style="color:#555;font-size:14px">
-            ${clienteNameDisplay}<br>
-            ${direccionDisplay}<br>
-            ${telefonoDisplay}
-          </div>
-        </div>
-        <div style="flex:1;min-width:180px;text-align:right;">
-          <strong style="display:block;margin-bottom:6px;color:#333">Detalles:</strong>
-          <div style="color:#555;font-size:14px">
-            ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>
-            Fecha: ${escapeHtml(String(dateDisplay))}<br>
-            Estado: ${escapeHtml(order.estado || order.status || "Pendiente")}
-          </div>
-        </div>
-      </div>
-
-      ${itemsHtml}
-
-      <div style="border-top:2px solid #eee;padding-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotal)}</span></div>
-        ${shippingCost > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Envío:</span><span>${fmtPrice(shippingCost)}</span></div>` : ""}
-        <div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px;margin-top:6px"><span>TOTAL:</span><span>${fmtPrice(total)}</span></div>
-      </div>
+    itemsHtml = `
+      <table class="invoice-items-table" role="table" aria-label="Items">
+        <thead>
+          <tr>
+            <th style="width:60%">Producto</th>
+            <th style="text-align:center;">Cant.</th>
+            <th style="text-align:right;">Precio</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     `;
-
-    contentEl.innerHTML = html;
-
-    // mostrar modal y bloquear scroll
-    overlay.style.display = "flex";
-    overlay.setAttribute("aria-hidden", "false");
-    document.documentElement.style.overflow = "hidden";
-    overlay.scrollTop = 0;
-    contentEl.scrollTop = 0;
-
-  } catch (err) {
-    // manejar silent fail si quieres
+  } else if (order.resumen) {
+    // Fallback: parsear resumen string "1 x Nombre | 2 x Otro"
+    const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
+    const rows = parts.map(p => {
+      const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
+      if (m) {
+        const qty = escapeHtml(m[1]);
+        const name = escapeHtml(m[2].trim());
+        return `<tr><td><strong>${name}</strong></td><td style="text-align:center;">${qty}</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+      }
+      return `<tr><td><strong>${escapeHtml(p)}</strong></td><td style="text-align:center;">—</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+    }).join("");
+    itemsHtml = `
+      <table class="invoice-items-table" role="table" aria-label="Items">
+        <thead>
+          <tr>
+            <th style="width:60%">Producto</th>
+            <th style="text-align:center;">Cant.</th>
+            <th style="text-align:right;">Precio</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  } else {
+    itemsHtml = `<div style="text-align:center;padding:18px;color:#9ca3af">No hay detalle de items.</div>`;
   }
+
+  // Totales/cliente
+  const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente");
+  const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || "No especificada");
+  const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || "—");
+  const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
+  const total = Number(order.total || 0);
+  const subtotal = Number(order.subtotal || (shippingCost > 0 ? (total - shippingCost) : total)) || 0;
+
+  const html = `
+    <div style="margin-bottom:12px;border-bottom:1px solid rgba(148,163,184,0.03);padding-bottom:8px">
+      <h4 style="margin:0 0 6px 0;color:#e5e7eb">Kukoro-shop</h4>
+      <div class="invoice-small">Confirmación de Orden</div>
+    </div>
+
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="flex:1;min-width:180px">
+        <strong style="display:block;margin-bottom:6px;color:#e5e7eb">Facturar a:</strong>
+        <div style="color:#cbd5e1;font-size:14px">
+          ${clienteNameDisplay}<br>
+          ${direccionDisplay}<br>
+          ${telefonoDisplay}
+        </div>
+      </div>
+      <div style="flex:1;min-width:180px;text-align:right">
+        <strong style="display:block;margin-bottom:6px;color:#e5e7eb">Detalles:</strong>
+        <div style="color:#cbd5e1;font-size:14px">
+          ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>
+          Fecha: ${escapeHtml(String(dateDisplay))}<br>
+          Estado: ${escapeHtml(order.estado || order.status || "Pendiente")}
+        </div>
+      </div>
+    </div>
+
+    ${itemsHtml}
+
+    <div style="border-top:1px solid rgba(148,163,184,0.03);padding-top:12px;margin-top:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotal)}</span></div>
+      ${shippingCost > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Envío:</span><span>${fmtPrice(shippingCost)}</span></div>` : ""}
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px;margin-top:6px"><span>TOTAL:</span><span>${fmtPrice(total)}</span></div>
+    </div>
+  `;
+
+  contentEl.innerHTML = html;
+  // mostrar modal
+  window.__showInvoiceOverlay();
+  // asegurar scroll top
+  const overlayElem = document.getElementById("invoice-overlay");
+  if (overlayElem) overlayElem.scrollTop = 0;
+  if (contentEl) contentEl.scrollTop = 0;
 }
 
+// resumen para listar
 function summarizeOrder(order) {
   if (!order) return "";
   if (order.resumen) return order.resumen;
@@ -423,14 +423,13 @@ function summarizeOrder(order) {
 }
 
 function renderEmpty() {
-  loadingEl && (loadingEl.style.display = "none");
-  listEl && (listEl.style.display = "block");
-  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#777;text-align:center">No tienes pedidos registrados todavía.</div>`;
+  if (loadingEl) loadingEl.style.display = "none";
+  if (listEl) { listEl.style.display = "block"; listEl.innerHTML = `<div style="padding:18px;color:#9ca3af;text-align:center">No tienes pedidos registrados todavía.</div>`; }
 }
 
 function renderError(err, userCtx = null) {
-  loadingEl && (loadingEl.style.display = "none");
-  listEl && (listEl.style.display = "block");
+  if (loadingEl) loadingEl.style.display = "none";
+  if (listEl) listEl.style.display = "block";
   const msg = (err && err.message) ? escapeHtml(err.message) : "Error desconocido";
 
   let userInfoHtml = "";
@@ -441,5 +440,7 @@ function renderError(err, userCtx = null) {
     userInfoHtml = `<div style="margin-top:8px;font-size:12px;color:#999">Request user — uid: ${u} · email: ${e} · name: ${d}</div>`;
   }
 
-  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f55;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
+  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f97373;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
 }
+
+export {}; // evita export accidental de variables globales en módulo
