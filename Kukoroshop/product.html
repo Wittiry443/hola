@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Producto — Kukoro-shop</title>
+
+  <!-- Estilos globales de la tienda -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Fuente (igual que el resto) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Script del producto (módulo) -->
+  <script type="module" src="js/product-page.js" defer></script>
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo" role="button" tabindex="0" aria-label="Ir a la tienda">Kukoro-shop</div>
+
+      <ul class="nav-links" aria-hidden="true"></ul>
+
+      <div class="nav-right">
+        <button id="back-to-shop-btn" class="login-btn" title="Volver a la tienda">Volver</button>
+        <span id="user-label" class="user-label" aria-hidden="true"></span>
+        <button id="cart-icon-btn" class="cart-icon" aria-label="Abrir carrito">Carrito (0)</button>
+        <button id="orders-btn" class="cart-icon" aria-label="Mis pedidos">Mis pedidos</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="container" style="padding-top:28px; padding-bottom:44px;">
+    <!-- Product page root: js/product-page.js renderizará todo aquí -->
+    <div id="product-page-root"></div>
+  </main>
+
+  <footer class="footer" role="contentinfo">
+    <div class="footer-links">
+      <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
+      <a href="terminos.html">TÉRMINOS</a>
+      <a href="privacidad.html">PRIVACIDAD</a>
+      <a href="contacto.html">CONTACTO</a>
+    </div>
+    <p class="footer-copy">© 2025 Kukoro-shop. Todos los derechos reservados.</p>
+  </footer>
+
+  <script>
+    // Navegación mínima coherente con el resto del sitio
+    document.querySelector(".logo")?.addEventListener("click", () => location.href = "index.html");
+    document.querySelector(".logo")?.addEventListener("keypress", (e) => { if (e.key === "Enter") location.href = "index.html"; });
+
+    document.getElementById("back-to-shop-btn").onclick = () => location.href = "index.html";
+    document.getElementById("orders-btn").onclick = () => location.href = "pedidos.html";
+    // cart-icon-btn queda enlazado por tu lógica de carrito existente
+  </script>
+</body>
+</html>
