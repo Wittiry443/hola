@@ -5,12 +5,12 @@ import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
 import { fmtPrice, escapeHtml } from "./utils.js";
 import {
-  ref,
-  onValue,
-  update,
-  remove,
-  get,
-  set
+  ref,
+  onValue,
+  update,
+  remove,
+  get,
+  set
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 import { getIdTokenResult } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
@@ -23,64 +23,64 @@ let filteredProducts = [];
 
 // --- Helper: comprobar admin (claims -> /admins -> ADMIN_EMAILS)
 async function isAdminUser(user) {
-  if (!user) return false;
-  try {
-    // 1) revisar /admins/{uid}
-    const snap = await get(ref(db, `admins/${user.uid}`));
-    if (snap.exists() && snap.val() === true) return true;
+  if (!user) return false;
+  try {
+    // 1) revisar /admins/{uid}
+    const snap = await get(ref(db, `admins/${user.uid}`));
+    if (snap.exists() && snap.val() === true) return true;
 
-    // 2) fallback: revisar users/{uid}.role == 'admin' (útil si migraste)
-    const uSnap = await get(ref(db, `users/${user.uid}/role`));
-    if (uSnap.exists() && String(uSnap.val()) === "admin") return true;
-  } catch (e) {
-    console.warn("isAdminUser error:", e);
-  }
+    // 2) fallback: revisar users/{uid}.role == 'admin' (útil si migraste)
+    const uSnap = await get(ref(db, `users/${user.uid}/role`));
+    if (uSnap.exists() && String(uSnap.val()) === "admin") return true;
+  } catch (e) {
+    console.warn("isAdminUser error:", e);
+  }
 
-  // 3) fallback UI-only: ADMIN_EMAILS (solo para mostrar UI, no para reglas)
-  if (ADMIN_EMAILS && ADMIN_EMAILS.includes(user.email)) return true;
+  // 3) fallback UI-only: ADMIN_EMAILS (solo para mostrar UI, no para reglas)
+  if (ADMIN_EMAILS && ADMIN_EMAILS.includes(user.email)) return true;
 
-  return false;
+  return false;
 }
 
 // onAuthStateChanged: comprobar y guardar user record (usa ensureUserRecord)
 onAuthStateChanged(auth, async (user) => {
-  const label = document.getElementById("admin-user-label");
-  if (!user) return (window.location.href = "index.html");
+  const label = document.getElementById("admin-user-label");
+  if (!user) return (window.location.href = "index.html");
 
-  // Guardar/actualizar registro base del usuario (client) - no crítico
-  try {
-    if (typeof ensureUserRecord === "function") await ensureUserRecord(user);
-  } catch (e) {
-    console.warn("ensureUserRecord fail", e);
-  }
+  // Guardar/actualizar registro base del usuario (client) - no crítico
+  try {
+    if (typeof ensureUserRecord === "function") await ensureUserRecord(user);
+  } catch (e) {
+    console.warn("ensureUserRecord fail", e);
+  }
 
-  // comprobar admin real
-  const isAdmin = await isAdminUser(user);
-  if (!isAdmin) {
-    alert("No tienes permisos de administrador.");
-    return (window.location.href = "index.html");
-  }
+  // comprobar admin real
+  const isAdmin = await isAdminUser(user);
+  if (!isAdmin) {
+    alert("No tienes permisos de administrador.");
+    return (window.location.href = "index.html");
+  }
 
-  if (label) label.textContent = user.email || "";
-  initAdminUI();
+  if (label) label.textContent = user.email || "";
+  initAdminUI();
 });
 
 // UI Inicial
 function initAdminUI() {
-  document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
-  document.getElementById("admin-back-btn").onclick = () => (window.location.href = "index.html");
-  document.getElementById("new-product-btn").onclick = openCreateProductModal;
-  document.getElementById("product-modal-close").onclick = closeProductModal;
-  document.getElementById("product-modal-overlay").onclick = (e) => {
-    if (e.target.id === "product-modal-overlay") closeProductModal();
-  };
-  document.getElementById("product-form").onsubmit = onSubmitProductForm;
+  document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
+  document.getElementById("admin-back-btn").onclick = () => (window.location.href = "index.html");
+  document.getElementById("new-product-btn").onclick = openCreateProductModal;
+  document.getElementById("product-modal-close").onclick = closeProductModal;
+  document.getElementById("product-modal-overlay").onclick = (e) => {
+    if (e.target.id === "product-modal-overlay") closeProductModal();
+  };
+  document.getElementById("product-form").onsubmit = onSubmitProductForm;
 
-  document.getElementById("product-search").oninput = applyProductFilters;
-  document.getElementById("product-category-filter").onchange = applyProductFilters;
+  document.getElementById("product-search").oninput = applyProductFilters;
+  document.getElementById("product-category-filter").onchange = applyProductFilters;
 
-  loadProducts();
-  generarDashboardPedidos(); // lee users/*/orders y arma la tabla de pedidos
+  loadProducts();
+  generarDashboardPedidos(); // lee users/*/orders y arma la tabla de pedidos
 }
 
 // -----------------------------------------------------------
@@ -90,533 +90,566 @@ function initAdminUI() {
 // con este código:
 
 function generarDashboardPedidos() {
-  const tbody = document.getElementById("orders-table-body");
-  if (!tbody) return;
+  const tbody = document.getElementById("orders-table-body");
+  if (!tbody) return;
 
-  const ventasDiaEl = document.getElementById("ventasDia");
-  const ventasMesEl = document.getElementById("ventasMes");
-  const pedidosEl   = document.getElementById("pedidosCount");
+  const ventasDiaEl = document.getElementById("ventasDia");
+  const ventasMesEl = document.getElementById("ventasMes");
+  const pedidosEl   = document.getElementById("pedidosCount");
 
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">Cargando pedidos desde Firebase...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">Cargando pedidos desde Firebase...</td></tr>`;
 
-  const today  = new Date();
-  const year   = today.getFullYear();
-  const month  = today.getMonth();
-  const day    = today.getDate();
+  const today  = new Date();
+  const year   = today.getFullYear();
+  const month  = today.getMonth();
+  const day    = today.getDate();
 
-  const usersRef = ref(db, "users");
+  const usersRef = ref(db, "users");
 
-  // Escuchar todos los usuarios (admins deberían tener permiso según las reglas)
-  onValue(usersRef, (snapshot) => {
-    const users = snapshot.val() || {};
-    const flatOrders = {}; // key -> { order, uid }
+  // Escuchar todos los usuarios (admins deberían tener permiso según las reglas)
+  onValue(usersRef, (snapshot) => {
+    const users = snapshot.val() || {};
+    const flatOrders = {}; // key -> { order, uid }
 
-    Object.entries(users).forEach(([uid, udata]) => {
-      const uOrders = udata.orders || {};
-      Object.entries(uOrders).forEach(([k, o]) => {
-        // guardamos copia plana con uid para saber dónde actualizar/eliminar
-        flatOrders[k] = { order: o, uid };
-      });
-    });
+    Object.entries(users).forEach(([uid, udata]) => {
+      const uOrders = udata.orders || {};
+      Object.entries(uOrders).forEach(([k, o]) => {
+        // guardamos copia plana con uid para saber dónde actualizar/eliminar
+        flatOrders[k] = { order: o, uid };
+      });
+    });
 
-    // renderizar la tabla a partir de flatOrders
-    const entries = Object.entries(flatOrders).sort((a, b) => {
-      const ta = a[1].order?.createdAt || 0;
-      const tb = b[1].order?.createdAt || 0;
-      return tb - ta;
-    });
+    // renderizar la tabla a partir de flatOrders
+    const entries = Object.entries(flatOrders).sort((a, b) => {
+      const ta = a[1].order?.createdAt || 0;
+      const tb = b[1].order?.createdAt || 0;
+      return tb - ta;
+    });
 
-    let totalDia = 0;
-    let totalMes = 0;
-    let totalPedidos = 0;
+    let totalDia = 0;
+    let totalMes = 0;
+    let totalPedidos = 0;
 
-    tbody.innerHTML = "";
+    tbody.innerHTML = "";
 
-    if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">No hay pedidos registrados todavía.</td></tr>`;
-    } else {
-      entries.forEach(([key, meta]) => {
-        totalPedidos++;
-        const order = meta.order || {};
-        const uid = meta.uid;
+    if (!entries.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">No hay pedidos registrados todavía.</td></tr>`;
+    } else {
+      entries.forEach(([key, meta]) => {
+        totalPedidos++;
+        const order = meta.order || {};
+        const uid = meta.uid;
 
-        const total = Number(order.total || 0);
-        let created = null;
-        try { if (order.createdAt) created = new Date(order.createdAt); } catch (e) { created = null; }
+        const total = Number(order.total || 0);
+        let created = null;
+        try { if (order.createdAt) created = new Date(order.createdAt); } catch (e) { created = null; }
 
-        const estado = (order.estado || "pendiente").toString();
-        const estadoLower = estado.toLowerCase();
-        if (created && !isNaN(created.getTime())) {
-          const y = created.getFullYear();
-          const m = created.getMonth();
-          const d = created.getDate();
-          if (estadoLower !== "cancelado") {
-            if (y === year && m === month) {
-              totalMes += total;
-              if (d === day) totalDia += total;
-            }
-          }
-        } else {
-          if (estadoLower !== "cancelado") totalMes += total;
-        }
+        const estado = (order.estado || "pendiente").toString();
+        const estadoLower = estado.toLowerCase();
+        if (created && !isNaN(created.getTime())) {
+          const y = created.getFullYear();
+          const m = created.getMonth();
+          const d = created.getDate();
+          if (estadoLower !== "cancelado") {
+            if (y === year && m === month) {
+              totalMes += total;
+              if (d === day) totalDia += total;
+            }
+          }
+        } else {
+          if (estadoLower !== "cancelado") totalMes += total;
+        }
 
-        const idPedido = order.idPedido || key;
-        const cliente  = order.cliente || order.userEmail || "Sin cliente";
-        const resumen  = order.resumen || "Sin resumen";
-        const estadoClass = estadoLower.replace(/\s+/g, "-");
+        const idPedido = order.idPedido || key;
+        const cliente  = order.cliente || order.userEmail || "Sin cliente";
+        const resumen  = order.resumen || "Sin resumen";
+        const estadoClass = estadoLower.replace(/\s+/g, "-");
 
-        const optionsHtml = ORDER_STATUSES.map(st => `
-          <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>
-        `).join("");
+        const optionsHtml = ORDER_STATUSES.map(st => `
+          <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>
+        `).join("");
 
-        tbody.innerHTML += `
+        tbody.innerHTML += `
 <tr data-order-key="${escapeHtml(key)}" data-order-uid="${escapeHtml(uid)}">
-  <td>${escapeHtml(String(idPedido))}</td>
-  <td>${escapeHtml(String(cliente))}</td>
-  <td>${escapeHtml(String(resumen))}</td>
-  <td>$${Number(total || 0).toLocaleString()}</td>
-  <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
-  <td>
-    <div class="order-actions">
-      <select class="order-status-select" data-order-key="${key}" data-order-uid="${uid}">
-        ${optionsHtml}
-      </select>
-      <button class="order-edit-btn" data-order-key="${key}" data-order-uid="${uid}" title="Editar pedido">✎</button>
-      <button class="order-delete-btn" data-order-key="${key}" data-order-uid="${uid}" title="Eliminar pedido">🗑</button>
-    </div>
-  </td>
+  <td>${escapeHtml(String(idPedido))}</td>
+  <td>${escapeHtml(String(cliente))}</td>
+  <td>${escapeHtml(String(resumen))}</td>
+  <td>$${Number(total || 0).toLocaleString()}</td>
+  <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
+  <td>
+    <div class="order-actions">
+      <select class="order-status-select" data-order-key="${key}" data-order-uid="${uid}">
+        ${optionsHtml}
+      </select>
+      <button class="order-edit-btn" data-order-key="${key}" data-order-uid="${uid}" title="Editar pedido">✎</button>
+      <button class="order-delete-btn" data-order-key="${key}" data-order-uid="${uid}" title="Eliminar pedido">🗑</button>
+    </div>
+  </td>
 </tr>
 `;
-      });
-    }
+      });
+    }
 
-    if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
-    if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
-    if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
+    if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
+    if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
+    if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
 
-    // Listeners para selects de estado (usamos uid para actualizar la copia correcta)
-    tbody.querySelectorAll(".order-status-select").forEach(sel => {
-      sel.onchange = async () => {
-        const key = sel.dataset.orderKey;
-        const uid = sel.dataset.orderUid;
-        const newStatus = sel.value;
-        try { await updateOrderStatus_forUser(key, uid, newStatus); }
-        catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
-      };
-    });
+    // Listeners para selects de estado (usamos uid para actualizar la copia correcta)
+    tbody.querySelectorAll(".order-status-select").forEach(sel => {
+      sel.onchange = async () => {
+        const key = sel.dataset.orderKey;
+        const uid = sel.dataset.orderUid;
+        const newStatus = sel.value;
+        try { await updateOrderStatus_forUser(key, uid, newStatus); }
+        catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
+      };
+    });
 
-    // Edit buttons
-    tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
-      btn.onclick = async () => {
-        const key = btn.dataset.orderKey;
-        const uid = btn.dataset.orderUid;
-        try {
-          const snap = await get(ref(db, `users/${uid}/orders/${key}`));
-          const order = snap.val();
-          if (!order) return alert("Pedido no encontrado.");
-          openEditOrderModal(uid, key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
-        } catch (e) {
-          console.error("Error cargando pedido para editar:", e);
-          alert("No se pudo cargar el pedido. Revisa la consola.");
-        }
-      };
-    });
+    // Edit buttons
+    tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const key = btn.dataset.orderKey;
+        const uid = btn.dataset.orderUid;
+        try {
+          const snap = await get(ref(db, `users/${uid}/orders/${key}`));
+          const order = snap.val();
+          if (!order) return alert("Pedido no encontrado.");
+          openEditOrderModal(uid, key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
+        } catch (e) {
+          console.error("Error cargando pedido para editar:", e);
+          alert("No se pudo cargar el pedido. Revisa la consola.");
+        }
+      };
+    });
 
-    // Delete buttons
-    tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
-      btn.onclick = async () => {
-        const key = btn.dataset.orderKey;
-        const uid = btn.dataset.orderUid;
-        if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
-        try { await deleteOrder_forUser(key, uid); }
-        catch (e) { console.error("Error eliminando pedido:", e); alert("No se pudo eliminar el pedido. Revisa la consola."); }
-      };
-    });
+    // Delete buttons
+    tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const key = btn.dataset.orderKey;
+        const uid = btn.dataset.orderUid;
+        if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
+        try { await deleteOrder_forUser(key, uid); }
+        catch (e) { console.error("Error eliminando pedido:", e); alert("No se pudo eliminar el pedido. Revisa la consola."); }
+      };
+    });
 
-  }, (error) => {
-    console.error("Error leyendo users/*/orders:", error);
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" style="text-align:center;color:#f55">
-          Error cargando pedidos desde Firebase. ${error && error.message ? escapeHtml(error.message) : ""}
-        </td>
-      </tr>
-    `;
-  });
+  }, (error) => {
+    console.error("Error leyendo users/*/orders:", error);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center;color:#f55">
+          Error cargando pedidos desde Firebase. ${error && error.message ? escapeHtml(error.message) : ""}
+        </td>
+      </tr>
+    `;
+  });
 }
 
 // Helper: actualizar estado en users/{uid}/orders/{orderKey}
 async function updateOrderStatus_forUser(orderKey, uid, newStatus) {
-  if (!uid) throw new Error("No UID provided for order");
-  await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
-  console.log(`[admin] users/${uid}/orders/${orderKey} estado -> ${newStatus}`);
+  if (!uid) throw new Error("No UID provided for order");
+  await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
+  console.log(`[admin] users/${uid}/orders/${orderKey} estado -> ${newStatus}`);
 }
 
 // Helper: eliminar en users/{uid}/orders/{orderKey}
 async function deleteOrder_forUser(orderKey, uid) {
-  if (!uid) throw new Error("No UID provided for order");
-  await remove(ref(db, `users/${uid}/orders/${orderKey}`));
-  console.log(`[admin] users/${uid}/orders/${orderKey} eliminado`);
+  if (!uid) throw new Error("No UID provided for order");
+  await remove(ref(db, `users/${uid}/orders/${orderKey}`));
+  console.log(`[admin] users/${uid}/orders/${orderKey} eliminado`);
 }
 
 // ----------------------------------------------------
 // Modal de edición de pedido (dinámico) - nuevo esquema shipping
 // ----------------------------------------------------
+// ---------- REEMPLAZA ESTAS DOS FUNCIONES EN js/admin.js ----------
+
+/**
+ * ensureOrderEditModalExists()
+ * - inyecta estilos concordes con styles.css (tema oscuro)
+ * - crea overlay/modal si no existe
+ */
 function ensureOrderEditModalExists() {
-  if (document.getElementById("order-edit-modal-overlay")) return;
+  if (document.getElementById("order-edit-modal-overlay")) return;
 
-  const overlay = document.createElement("div");
-  overlay.id = "order-edit-modal-overlay";
-  overlay.style = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:30000;";
-  overlay.innerHTML = `
-    <div id="order-edit-modal" style="width:92%;max-width:720px;background:#fff;border-radius:10px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
-      <h3 id="order-edit-title" style="margin:0 0 8px 0">Editar pedido</h3>
-      <div id="order-edit-body" style="max-height:60vh;overflow:auto"></div>
-      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
-        <button id="order-edit-cancel" class="btn-ghost btn-small">Cancelar</button>
-        <button id="order-edit-save" class="btn-primary btn-small">Guardar</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
+  // estilos inyectados (coherentes con styles.css)
+  const sId = "order-edit-modal-styles";
+  if (!document.getElementById(sId)) {
+    const style = document.createElement("style");
+    style.id = sId;
+    style.innerHTML = `
+/* Order edit modal - estilo coherente con site (oscuro) */
+#order-edit-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2,6,23,0.7);
+  z-index: 40000;
+  padding: 20px;
+}
+#order-edit-modal {
+  width: 100%;
+  max-width: 760px;
+  background: radial-gradient(circle at 20% 0%, rgba(37,99,235,0.03), transparent 55%), #020617;
+  border: 1px solid rgba(148,163,184,0.04);
+  color: #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(2,6,23,0.9);
+  padding: 18px;
+  font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#order-edit-modal h3 { margin:0 0 8px 0; color:#e5e7eb; font-size:1.1rem; }
+#order-edit-body { max-height:60vh; overflow:auto; color:#cbd5e1; font-size:14px; }
+#order-edit-modal .form-row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px; }
+#order-edit-modal label { display:block; font-weight:700; margin-bottom:6px; color:#cbd5e1; font-size:0.9rem; }
+#order-edit-modal input, #order-edit-modal textarea, #order-edit-modal select {
+  width:100%; padding:8px; border-radius:8px; border:1px solid rgba(31,41,55,0.8);
+  background:#0f172a; color:#e5e7eb; font-size:0.95rem;
+}
+#order-edit-modal textarea[readonly], #order-edit-modal input[readonly] { opacity:0.9; background:#071025; }
+#order-edit-modal .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+#order-edit-modal .btn-primary { background: linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; border:none; padding:8px 12px; border-radius:999px; cursor:pointer; font-weight:700; }
+#order-edit-modal .btn-ghost { background:transparent; border:1px solid rgba(148,163,184,0.12); color:#e5e7eb; padding:8px 12px; border-radius:999px; cursor:pointer; }
+@media (max-width:720px){ #order-edit-modal .form-row { grid-template-columns: 1fr; } }
+    `;
+    document.head.appendChild(style);
+  }
 
-  overlay.querySelector("#order-edit-cancel").onclick = () => {
-    overlay.style.display = "none";
-  };
-  overlay.onclick = (e) => {
-    if (e.target === overlay) overlay.style.display = "none";
-  };
+  // crear overlay + modal
+  const overlay = document.createElement("div");
+  overlay.id = "order-edit-modal-overlay";
+  overlay.innerHTML = `
+    <div id="order-edit-modal" role="dialog" aria-modal="true" aria-labelledby="order-edit-title">
+      <h3 id="order-edit-title">Editar pedido</h3>
+      <div id="order-edit-body" tabindex="0"></div>
+      <div class="modal-actions">
+        <button id="order-edit-cancel" class="btn-ghost">Cancelar</button>
+        <button id="order-edit-save" class="btn-primary">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // handlers globales
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
+
+  // cancelar
+  overlay.querySelector("#order-edit-cancel").addEventListener("click", () => {
+    overlay.style.display = "none";
+  });
+
+  // el botón guardar se le asigna dinámicamente en openEditOrderModal (para tener contexto uid/key)
 }
 
-// abre modal con datos de orden (acepta uid y key)
+/**
+ * openEditOrderModal(uid, orderKey, order)
+ * - llena el modal con campos legibles, compatibles con shipping nuevo/legacy
+ * - muestra modal y gestiona guardado (actualiza users/{uid}/orders/{orderKey})
+ */
 function openEditOrderModal(uid, orderKey, order) {
-  ensureOrderEditModalExists();
-  const overlay = document.getElementById("order-edit-modal-overlay");
-  const body = document.getElementById("order-edit-body");
+  ensureOrderEditModalExists();
+  const overlay = document.getElementById("order-edit-modal-overlay");
+  const body = document.getElementById("order-edit-body");
+  if (!overlay || !body) return;
 
-  // Normalizar shipping: soporta esquema nuevo y legacy
-  const shippingRaw = order.shipping || order.direccion || order.delivery || {};
-  const fullName =
-    shippingRaw.fullName ||
-    shippingRaw.name ||
-    shippingRaw.cliente ||
-    shippingRaw.contactName ||
-    order.cliente ||
-    "";
-  const phone =
-    shippingRaw.phone ||
-    shippingRaw.telefono ||
-    shippingRaw.contactPhone ||
-    shippingRaw.mobile ||
-    "";
-  const address =
-    shippingRaw.address ||
-    shippingRaw.addressLine ||
-    shippingRaw.calle ||
-    shippingRaw.fullAddress ||
-    shippingRaw.direccion ||
-    "";
-  const notes =
-    shippingRaw.notes ||
-    shippingRaw.notas ||
-    shippingRaw.info ||
-    shippingRaw.fullAddress ||
-    "";
+  // Normalizar shipping legacy/new
+  const shippingRaw = order.shipping || order.direccion || order.delivery || {};
+  const fullName =
+    shippingRaw.fullName ||
+    shippingRaw.name ||
+    shippingRaw.cliente ||
+    shippingRaw.contactName ||
+    order.cliente || "";
+  const phone =
+    shippingRaw.phone ||
+    shippingRaw.telefono ||
+    shippingRaw.contactPhone ||
+    shippingRaw.mobile || "";
+  const address =
+    shippingRaw.address ||
+    shippingRaw.addressLine ||
+    shippingRaw.calle ||
+    shippingRaw.fullAddress ||
+    shippingRaw.direccion || "";
+  const notes =
+    shippingRaw.notes || shippingRaw.notas || shippingRaw.info || "";
 
-  const optionsHtml = ORDER_STATUSES.map(st => `<option value="${st}" ${st === (order.estado || "pendiente") ? "selected" : ""}>${st}</option>`).join("");
+  const optionsHtml = ORDER_STATUSES.map(st => `<option value="${st}" ${st === (order.estado || "pendiente") ? "selected" : ""}>${st}</option>`).join("");
 
-  body.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div>
-        <label style="display:block;font-weight:700;margin-bottom:6px">ID Pedido</label>
-        <div style="padding:8px;border-radius:6px;background:#f7f7f7">${escapeHtml(order.idPedido || orderKey)}</div>
-      </div>
-      <div>
-        <label style="display:block;font-weight:700;margin-bottom:6px">Cliente</label>
-        <div style="padding:8px;border-radius:6px;background:#f7f7f7">${escapeHtml(order.cliente || order.userEmail || "")}</div>
-      </div>
-    </div>
+  // body content (limpio y legible)
+  body.innerHTML = `
+    <div class="form-row">
+      <div>
+        <label>ID Pedido</label>
+        <input readonly value="${escapeHtml(order.idPedido || orderKey)}" />
+        </div>
+      <div>
+        <label>Cliente</label>
+        <input readonly value="${escapeHtml(order.cliente || order.userEmail || "")}" />
+      </div>
+    </div>
 
-    <div style="margin-top:10px">
-      <label style="display:block;font-weight:700;margin-bottom:6px">Resumen</label>
-      <textarea id="order-edit-resumen" rows="3" style="width:100%;padding:8px;border-radius:6px" readonly>${escapeHtml(order.resumen || "")}</textarea>
-    </div>
+    <div style="margin-top:8px">
+      <label>Resumen</label>
+      <textarea id="order-edit-resumen" rows="3" readonly style="resize:vertical">${escapeHtml(order.resumen || "")}</textarea>
+    </div>
 
-    <div style="margin-top:10px;display:flex;gap:10px;">
-      <div style="flex:1">
-        <label style="display:block;font-weight:700;margin-bottom:6px">Estado</label>
-        <select id="order-edit-estado" style="width:100%;padding:8px;border-radius:6px">${optionsHtml}</select>
-      </div>
-      <div style="width:160px">
-        <label style="display:block;font-weight:700;margin-bottom:6px">Total</label>
-        <div style="padding:8px;border-radius:6px;background:#f7f7f7">$${Number(order.total || 0).toLocaleString()}</div>
-      </div>
-    </div>
+    <div class="form-row" style="margin-top:10px">
+      <div>
+        <label>Estado</label>
+        <select id="order-edit-estado">${optionsHtml}</select>
+      </div>
+      <div>
+        <label>Total</label>
+        <input readonly value="$${Number(order.total || 0).toLocaleString()}" />
+      </div>
+    </div>
 
-    <div style="margin-top:12px">
-      <h4 style="margin:0 0 8px 0">Dirección de envío (editable)</h4>
-      <div style="display:grid;grid-template-columns:1fr;gap:8px">
-        <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Nombre completo</label>
-          <input id="order-edit-fullName" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(fullName)}" />
-        </div>
+    <div style="margin-top:10px">
+      <h4 style="margin:8px 0 6px 0;color:#e5e7eb;font-size:0.95rem">Dirección de envío (editable)</h4>
+      <div style="display:grid;grid-template-columns:1fr;gap:8px">
+        <div>
+          <label>Nombre completo</label>
+          <input id="order-edit-fullName" value="${escapeHtml(fullName)}" />
+        </div>
+        <div>
+          <label>Teléfono</label>
+          <input id="order-edit-phone" value="${escapeHtml(phone)}" />
+        </div>
+        <div>
+          <label>Dirección</label>
+          <input id="order-edit-address" value="${escapeHtml(address)}" />
+        </div>
+        <div>
+          <label>Notas / indicaciones</label>
+          <textarea id="order-edit-notes" rows="3" style="resize:vertical">${escapeHtml(notes)}</textarea>
+        </div>
+      </div>
+    </div>
+  `;
 
-        <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Número de teléfono</label>
-          <input id="order-edit-phone" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(phone)}" />
-        </div>
+  // mostrar modal
+  overlay.style.display = "flex";
+  body.focus();
 
-        <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Dirección</label>
-          <input id="order-edit-address" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(address)}" />
-        </div>
+  // Asignar handler de guardar (remueve handler previo para evitar duplicados)
+  const saveBtn = document.getElementById("order-edit-save");
+  const newSave = async () => {
+    const newEstado = document.getElementById("order-edit-estado").value;
+    const fullNameNew = document.getElementById("order-edit-fullName").value.trim();
+    const phoneNew = document.getElementById("order-edit-phone").value.trim();
+    const addressNew = document.getElementById("order-edit-address").value.trim();
+    const notesNew = document.getElementById("order-edit-notes").value.trim();
 
-        <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Información adicional / notas para el repartidor</label>
-          <textarea id="order-edit-notes" rows="3" style="width:100%;padding:8px;border-radius:6px">${escapeHtml(notes)}</textarea>
-        </div>
-      </div>
-    </div>
-  `;
+    const shippingObj = {
+      ...(fullNameNew ? { fullName: fullNameNew } : {}),
+      ...(phoneNew ? { phone: phoneNew } : {}),
+      ...(addressNew ? { address: addressNew, addressLine: addressNew } : {}),
+      ...(notesNew ? { notes: notesNew, fullAddress: notesNew } : {})
+    };
 
-  // show overlay
-  overlay.style.display = "flex";
+    try {
+      // actualizar users/{uid}/orders/{orderKey}
+      await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
+      // intentar actualizar copia legacy en /orders/{orderKey} si existe (no fatal)
+      try {
+        const legacySnap = await get(ref(db, `orders/${orderKey}`));
+        if (legacySnap.exists()) {
+          await update(ref(db, `orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
+        }
+      } catch (e) { /* no fatal */ }
 
-  // save handler
-  const saveBtn = overlay.querySelector("#order-edit-save");
-  const cancelBtn = overlay.querySelector("#order-edit-cancel");
+      overlay.style.display = "none";
+      generarDashboardPedidos();
+      alert("Pedido actualizado correctamente.");
+    } catch (err) {
+      console.error("Error guardando cambios del pedido:", err);
+      alert("No se pudo guardar el pedido. Revisa la consola para más detalles.");
+    }
+  };
 
-  // remove previous handlers to avoid duplicates
-  saveBtn.onclick = null;
-  cancelBtn.onclick = null;
-
-  saveBtn.onclick = async () => {
-    const newEstado = document.getElementById("order-edit-estado").value;
-    const fullNameNew = document.getElementById("order-edit-fullName").value.trim();
-    const phoneNew = document.getElementById("order-edit-phone").value.trim();
-    const addressNew = document.getElementById("order-edit-address").value.trim();
-    const notesNew = document.getElementById("order-edit-notes").value.trim();
-
-    const shippingObj = {
-      ...(fullNameNew ? { fullName: fullNameNew } : {}),
-      ...(phoneNew ? { phone: phoneNew } : {}),
-      ...(addressNew ? { address: addressNew, addressLine: addressNew } : {}),
-      ...(notesNew ? { notes: notesNew, fullAddress: notesNew } : {})
-    };
-
-    try {
-      // actualizar users/{uid}/orders/{orderKey}
-      await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
-
-      // (Si queda alguna copia legacy en /orders/{orderKey}, opcionalmente actualizamos/limpiamos)
-      try {
-        const legacySnap = await get(ref(db, `orders/${orderKey}`));
-        if (legacySnap.exists()) {
-          // opcional: actualizar la copia legacy también (o eliminar)
-          await update(ref(db, `orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
-        }
-      } catch (e) {
-        // no fatal
-        console.warn("No se pudo actualizar/limpiar legacy /orders:", e);
-      }
-
-      overlay.style.display = "none";
-      // re-render tabla (simple)
-      generarDashboardPedidos();
-      alert("Pedido actualizado correctamente.");
-    } catch (err) {
-      console.error("Error guardando cambios del pedido:", err);
-      alert("No se pudo guardar el pedido. Revisa la consola para detalles.");
-    }
-  };
-
-  cancelBtn.onclick = () => {
-    overlay.style.display = "none";
-  };
+  // evitar múltiples asignaciones
+  saveBtn.replaceWith(saveBtn.cloneNode(true));
+  const freshSaveBtn = document.getElementById("order-edit-save");
+  freshSaveBtn.addEventListener("click", newSave);
 }
+
 
 // -----------------------------------------------------------
 // Cargar productos desde Sheets (sin cambios)
 // -----------------------------------------------------------
 async function loadProducts() {
-  const tbody = document.getElementById("product-table-body");
-  if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center">Cargando...</td></tr>`;
+  const tbody = document.getElementById("product-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center">Cargando...</td></tr>`;
 
-  try {
-    const res = await fetch(`${API_URL}?all=1&_=${Date.now()}`);
-    const data = await res.json();
+  try {
+    const res = await fetch(`${API_URL}?all=1&_=${Date.now()}`);
+    const data = await res.json();
 
-    allProducts = (data.products || []).map(p => ({
-      row: p.row,
-      sheetKey: p.data.Categoria,
-      data: p.data,
-    }));
+    allProducts = (data.products || []).map(p => ({
+      row: p.row,
+      sheetKey: p.data.Categoria,
+      data: p.data,
+    }));
 
-    filteredProducts = [...allProducts];
-    fillProductCategoryFilter();
-    renderProductsTable();
-  } catch (err) {
-    console.error(err);
-    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="color:#f55;text-align:center;">Error cargando productos</td></tr>`;
-  }
+    filteredProducts = [...allProducts];
+    fillProductCategoryFilter();
+    renderProductsTable();
+  } catch (err) {
+    console.error(err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="color:#f55;text-align:center;">Error cargando productos</td></tr>`;
+  }
 }
 
 // -----------------------------------------------------------
 // Filtros + Tabla de productos (sin cambios)
 // -----------------------------------------------------------
 function fillProductCategoryFilter() {
-  const select = document.getElementById("product-category-filter");
-  const cats = [...new Set(allProducts.map(p => p.sheetKey))];
+  const select = document.getElementById("product-category-filter");
+  const cats = [...new Set(allProducts.map(p => p.sheetKey))];
 
-  select.innerHTML = `<option value="">Todas</option>`;
-  cats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+  select.innerHTML = `<option value="">Todas</option>`;
+  cats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
 }
 
 function applyProductFilters() {
-  const term = document.getElementById("product-search").value.toLowerCase();
-  const cat = document.getElementById("product-category-filter").value;
+  const term = document.getElementById("product-search").value.toLowerCase();
+  const cat = document.getElementById("product-category-filter").value;
 
-  filteredProducts = allProducts.filter(p => {
-    const name = (p.data.Nombre || "").toLowerCase();
-    return name.includes(term) && (!cat || p.sheetKey === cat);
-  });
+  filteredProducts = allProducts.filter(p => {
+    const name = (p.data.Nombre || "").toLowerCase();
+    return name.includes(term) && (!cat || p.sheetKey === cat);
+  });
 
-  renderProductsTable();
+  renderProductsTable();
 }
 
 function renderProductsTable() {
-  const tbody = document.getElementById("product-table-body");
-  if (!tbody) return;
+  const tbody = document.getElementById("product-table-body");
+  if (!tbody) return;
 
-  if (!filteredProducts.length)
-    return tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">Sin resultados</td></tr>`;
+  if (!filteredProducts.length)
+    return tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">Sin resultados</td></tr>`;
 
-  tbody.innerHTML = "";
-  filteredProducts.forEach(p => {
-    const d = p.data;
-    tbody.innerHTML += `
-      <tr>
-        <td>${p.row}</td>
-        <td>${p.sheetKey}</td>
-        <td>${escapeHtml(d.Nombre)}</td>
-        <td>$${fmtPrice(d.Precio)}</td>
-        <td>${d.Stock}</td>
-        <td>
-          <button class="btn-ghost btn-small" data-edit="${p.sheetKey}::${p.row}">Editar</button>
-          <button class="btn-small" style="background:#E53935;color:#fff" data-del="${p.sheetKey}::${p.row}">Eliminar</button>
-        </td>
-      </tr>`;
-  });
+  tbody.innerHTML = "";
+  filteredProducts.forEach(p => {
+    const d = p.data;
+    tbody.innerHTML += `
+      <tr>
+        <td>${p.row}</td>
+        <td>${p.sheetKey}</td>
+        <td>${escapeHtml(d.Nombre)}</td>
+        <td>$${fmtPrice(d.Precio)}</td>
+        <td>${d.Stock}</td>
+        <td>
+          <button class="btn-ghost btn-small" data-edit="${p.sheetKey}::${p.row}">Editar</button>
+          <button class="btn-small" style="background:#E53935;color:#fff" data-del="${p.sheetKey}::${p.row}">Eliminar</button>
+        </td>
+      </tr>`;
+  });
 
-  tbody.querySelectorAll("[data-edit]").forEach(b => {
-    const [s, r] = b.dataset.edit.split("::");
-    b.onclick = () => openEditProductModal(allProducts.find(p => p.row == r && p.sheetKey == s));
-  });
+  tbody.querySelectorAll("[data-edit]").forEach(b => {
+    const [s, r] = b.dataset.edit.split("::");
+    b.onclick = () => openEditProductModal(allProducts.find(p => p.row == r && p.sheetKey == s));
+  });
 
-  tbody.querySelectorAll("[data-del]").forEach(b => {
-    const [s, r] = b.dataset.del.split("::");
-    b.onclick = () => deleteProduct(allProducts.find(p => p.row == r && p.sheetKey == s));
-  });
+  tbody.querySelectorAll("[data-del]").forEach(b => {
+    const [s, r] = b.dataset.del.split("::");
+    b.onclick = () => deleteProduct(allProducts.find(p => p.row == r && p.sheetKey == s));
+  });
 }
 
 //-----------------------------------------------------------
 // CREAR / EDITAR PRODUCTO (sin cambios)
 //-----------------------------------------------------------
 function openCreateProductModal() {
-  document.getElementById("product-modal-title").textContent = "Nuevo producto";
-  clearForm();
-  showModal();
+  document.getElementById("product-modal-title").textContent = "Nuevo producto";
+  clearForm();
+  showModal();
 }
 
 function openEditProductModal(prod) {
-  const d = prod.data;
-  document.getElementById("product-modal-title").textContent = "Editar producto";
+  const d = prod.data;
+  document.getElementById("product-modal-title").textContent = "Editar producto";
 
-  document.getElementById("product-row").value = prod.row;
-  document.getElementById("product-sheetKey").value = prod.sheetKey;
-  document.getElementById("product-name").value = d.Nombre;
-  document.getElementById("product-price").value = d.Precio;
-  document.getElementById("product-stock").value = d.Stock;
-  document.getElementById("product-img").value = d.Img || "";
-  document.getElementById("product-description").value = d.Descripcion || "";
+  document.getElementById("product-row").value = prod.row;
+  document.getElementById("product-sheetKey").value = prod.sheetKey;
+  document.getElementById("product-name").value = d.Nombre;
+  document.getElementById("product-price").value = d.Precio;
+  document.getElementById("product-stock").value = d.Stock;
+  document.getElementById("product-img").value = d.Img || "";
+  document.getElementById("product-description").value = d.Descripcion || "";
 
-  showModal();
+  showModal();
 }
 
 function showModal() {
-  document.getElementById("product-modal-overlay").style.display = "flex";
+  document.getElementById("product-modal-overlay").style.display = "flex";
 }
 function closeProductModal() {
-  document.getElementById("product-modal-overlay").style.display = "none";
+  document.getElementById("product-modal-overlay").style.display = "none";
 }
 function clearForm() {
-  document.querySelector("#product-form").reset();
+  document.querySelector("#product-form").reset();
 }
 
 //-----------------------------------------------------------
 // GUARDAR / ELIMINAR PRODUCTOS (sin cambios)
 //-----------------------------------------------------------
 async function onSubmitProductForm(e) {
-  e.preventDefault();
+  e.preventDefault();
 
-  const row = document.getElementById("product-row").value.trim();
-  const isUpdate = !!row;
+  const row = document.getElementById("product-row").value.trim();
+  const isUpdate = !!row;
 
-  const payload = {
-    action: isUpdate ? "update" : "add",
-    row: isUpdate ? Number(row) : "",
-    sheetKey: document.getElementById("product-sheetKey").value.trim(),
-    name: document.getElementById("product-name").value.trim(),
-    price: Number(document.getElementById("product-price").value.trim()),
-    stock: Number(document.getElementById("product-stock").value.trim()),
-    img: document.getElementById("product-img").value.trim(),
-    description: document.getElementById("product-description").value.trim()
-  };
+  const payload = {
+    action: isUpdate ? "update" : "add",
+    row: isUpdate ? Number(row) : "",
+    sheetKey: document.getElementById("product-sheetKey").value.trim(),
+    name: document.getElementById("product-name").value.trim(),
+    price: Number(document.getElementById("product-price").value.trim()),
+    stock: Number(document.getElementById("product-stock").value.trim()),
+    img: document.getElementById("product-img").value.trim(),
+    description: document.getElementById("product-description").value.trim()
+  };
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  const r = await res.json();
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const r = await res.json();
 
-  if (r.ok) {
-    alert("✔ Guardado correctamente");
-    loadProducts();
-    closeProductModal();
-  } else {
-    alert("❌ Error al guardar: " + JSON.stringify(r));
-  }
+  if (r.ok) {
+    alert("✔ Guardado correctamente");
+    loadProducts();
+    closeProductModal();
+  } else {
+    alert("❌ Error al guardar: " + JSON.stringify(r));
+  }
 }
 
 async function deleteProduct(prod) {
-  if (!confirm("¿Eliminar producto permanentemente?")) return;
+  if (!confirm("¿Eliminar producto permanentemente?")) return;
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "delete", sheetKey: prod.sheetKey, row: Number(prod.row) })
-  });
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete", sheetKey: prod.sheetKey, row: Number(prod.row) })
+  });
 
-  const r = await res.json();
-  if (r.ok) {
-    alert("🗑 Producto eliminado");
-    loadProducts();
-  } else {
-    alert("Error al borrar:\n" + JSON.stringify(r));
-  }
+  const r = await res.json();
+  if (r.ok) {
+    alert("🗑 Producto eliminado");
+    loadProducts();
+  } else {
+    alert("Error al borrar:\n" + JSON.stringify(r));
+  }
 }
 
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
-
-
-
-
-
-
-
-
-
