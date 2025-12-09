@@ -188,7 +188,7 @@ function renderOrdersObject(obj) {
             <div style="margin-top:6px">
                 <span class="estado" style="padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:12px;">${escapeHtml(estado)}</span>
             </div>
-          </div>
+            </div>
         </div>
         <div style="margin-top:10px;color:#444;font-size:14px;">${escapeHtml(resumen)}</div>
         
@@ -210,36 +210,75 @@ function renderOrdersObject(obj) {
 
 // LÓGICA PARA LLENAR Y MOSTRAR EL MODAL DE FACTURA
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
+    // Si la orden es inválida, no hacemos nada
+    if (!order || typeof order !== 'object') {
+        console.error("El objeto 'order' es inválido o está vacío. No se puede mostrar la factura.", order);
+        return;
+    }
+
     const modalOverlay = document.getElementById('invoice-overlay');
     const contentEl = document.getElementById('invoice-content');
     
-    // Obtener items (soportando estructura 'items' o 'cart')
+    // 1. OBTENER ITEMS DETALLADOS (ARRAY)
     const items = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
     
-    // Generar filas de la tabla: se omiten los campos de precio unitario y subtotal por línea
-    const itemsHtml = items.map(item => {
-        const name = item.name || item.title || item.id || 'Producto (Sin nombre)';
-        const qty = item.qty || item.quantity || 1;
-        
-        return `
-            <tr>
-                <td>
-                    <strong style="display:block;color:#333;">${escapeHtml(name)}</strong>
-                    <span style="font-size:12px;color:#888;">Ref: ${item.id || '-'}</span>
-                </td>
-                <td style="text-align:center;">${qty}</td>
-                <td style="text-align:right;">—</td>
-                <td style="text-align:right;">—</td>
-            </tr>
-        `;
-    }).join('');
+    // 2. GENERAR CONTENIDO DE LOS ARTÍCULOS (TABLA O RESUMEN)
+    let itemDetailContent = '';
+    
+    if (items.length > 0) {
+        // Opción A: Tenemos la lista detallada de items (ARRAY)
+        const itemsHtml = items.map(item => {
+            const name = item.name || item.title || item.id || 'Producto (Sin nombre)';
+            const qty = item.qty || item.quantity || 1;
+            
+            return `
+                <tr>
+                    <td>
+                        <strong style="display:block;color:#333;">${escapeHtml(name)}</strong>
+                        <span style="font-size:12px;color:#888;">Ref: ${item.id || '-'}</span>
+                    </td>
+                    <td style="text-align:center;">${qty}</td>
+                    <td style="text-align:right;">—</td>
+                    <td style="text-align:right;">—</td>
+                </tr>
+            `;
+        }).join('');
 
-    // Extracción de Cliente/Dirección (Ahora robusto)
+        itemDetailContent = `
+            <table class="invoice-items-table">
+                <thead>
+                    <tr>
+                        <th style="width:70%">Producto</th>
+                        <th style="text-align:center;">Cant.</th>
+                        <th style="text-align:right;">Precio</th>
+                        <th style="text-align:right;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemsHtml}
+                </tbody>
+            </table>
+        `;
+
+    } else if (order.resumen) {
+        // Opción B: Solo tenemos el resumen (STRING)
+        itemDetailContent = `
+            <div style="margin: 15px 0; padding: 15px; border: 1px dashed #ccc; border-radius: 8px; background: #f9f9f9;">
+                <strong style="display: block; margin-bottom: 5px; color: #444;">Resumen de Artículos (Detalle Completo No Disponible):</strong>
+                <p style="margin: 0; font-size: 14px; color: #555;">${escapeHtml(order.resumen)}</p>
+            </div>
+        `;
+    } else {
+        // Opción C: No hay detalle ni resumen
+        itemDetailContent = `<div style="text-align:center;padding:20px;color:#777;">No hay items ni resumen detallado disponible para esta orden.</div>`;
+    }
+
+    // Extracción de Cliente/Dirección
     const clienteNameDisplay = order.cliente || order.userEmail || "Cliente no especificado";
     const direccionDisplay = order.shipping?.address || order.shipping?.addressLine || order.address || order.direccion || "No especificada";
     const telefonoDisplay = order.shipping?.phone || order.phone || order.telefono || "—";
     
-    // CORRECCIÓN CLAVE: Extracción de costo de envío
+    // CORRECCIÓN CLAVE: Definición de costo de envío
     const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
 
 
@@ -268,19 +307,7 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
             </div>
         </div>
 
-        <table class="invoice-items-table">
-            <thead>
-                <tr>
-                    <th style="width:70%">Producto</th>
-                    <th style="text-align:center;">Cant.</th>
-                    <th style="text-align:right;">Precio</th>
-                    <th style="text-align:right;">Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${itemsHtml || '<tr><td colspan="4" style="text-align:center;padding:20px;">No hay items detallados</td></tr>'}
-            </tbody>
-        </table>
+        ${itemDetailContent}
 
         <div style="border-top:2px solid #eee; padding-top:15px;">
             <div class="invoice-row">
