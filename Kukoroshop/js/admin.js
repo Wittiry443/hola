@@ -1,4 +1,4 @@
-// js/admin.js (actualizado)
+// js/admin.js (usa users/{uid}/orders como fuente única)
 // importaciones
 import { auth, onAuthStateChanged, db, ensureUserRecord } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
@@ -15,7 +15,7 @@ import {
 import { getIdTokenResult } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
 // Estados disponibles para el select
-const ORDER_STATUSES = ["pendiente","en proceso","enviado","entregado","cancelado"];
+const ORDER_STATUSES = ["pendiente", "en proceso", "enviado", "entregado", "cancelado"];
 
 // Estado interno
 let allProducts = [];
@@ -48,7 +48,11 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return (window.location.href = "index.html");
 
   // Guardar/actualizar registro base del usuario (client) - no crítico
-  try { if (typeof ensureUserRecord === "function") await ensureUserRecord(user); } catch(e){ console.warn("ensureUserRecord fail", e); }
+  try {
+    if (typeof ensureUserRecord === "function") await ensureUserRecord(user);
+  } catch (e) {
+    console.warn("ensureUserRecord fail", e);
+  }
 
   // comprobar admin real
   const isAdmin = await isAdminUser(user);
@@ -76,30 +80,58 @@ function initAdminUI() {
   document.getElementById("product-category-filter").onchange = applyProductFilters;
 
   loadProducts();
-  generarDashboardPedidos(); // lee /orders y arma la tabla de pedidos
+  generarDashboardPedidos(); // lee users/*/orders y arma la tabla de pedidos
 }
 
-// DASHBOARD DE PEDIDOS (Firebase Realtime Database)
+// -----------------------------------------------------------
+// 📦 DASHBOARD DE PEDIDOS (lee users/{uid}/orders)
+// -----------------------------------------------------------
 function generarDashboardPedidos() {
   const tbody = document.getElementById("orders-table-body");
   if (!tbody) return;
 
   const ventasDiaEl = document.getElementById("ventasDia");
   const ventasMesEl = document.getElementById("ventasMes");
-  const pedidosEl   = document.getElementById("pedidosCount");
+  const pedidosEl = document.getElementById("pedidosCount");
 
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">Cargando pedidos desde Firebase...</td></tr>`;
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="6" style="text-align:center;color:#999">
+        Cargando pedidos desde Firebase (users/*/orders)...
+      </td>
+    </tr>
+  `;
 
-  const today  = new Date();
-  const year   = today.getFullYear();
-  const month  = today.getMonth();
-  const day    = today.getDate();
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const day = today.getDate();
 
-  const ordersRef = ref(db, "orders");
+  const usersRef = ref(db, "users");
 
-  onValue(ordersRef, (snapshot) => {
-    const data = snapshot.val() || {};
-    const entries = Object.entries(data);
+  // Escuchamos usuarios completos y extraemos orders de cada uno
+  onValue(usersRef, (snapshot) => {
+    const users = snapshot.val() || {};
+    const entries = []; // { key, order, uid, userEmail }
+
+    Object.entries(users).forEach(([uid, udata]) => {
+      const orders = udata.orders || {};
+      Object.entries(orders).forEach(([key, order]) => {
+        entries.push({
+          key,
+          order,
+          uid,
+          userEmail: udata.email || order.userEmail || udata.email || ""
+        });
+      });
+    });
+
+    // ordenar por createdAt (desc)
+    entries.sort((a, b) => {
+      const ta = a.order?.createdAt || 0;
+      const tb = b.order?.createdAt || 0;
+      return Number(tb) - Number(ta);
+    });
 
     let totalDia = 0;
     let totalMes = 0;
@@ -108,21 +140,24 @@ function generarDashboardPedidos() {
     tbody.innerHTML = "";
 
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">No hay pedidos registrados todavía.</td></tr>`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align:center;color:#aaa">
+            No hay pedidos registrados todavía.
+          </td>
+        </tr>
+      `;
     } else {
-      entries.forEach(([key, order]) => {
+      entries.forEach(({ key, order, uid }) => {
         totalPedidos++;
-
         const total = Number(order.total || 0);
 
-        // Fecha
         let created = null;
         try { if (order.createdAt) created = new Date(order.createdAt); } catch (e) { created = null; }
 
-        const estado   = (order.estado || "pendiente").toString();
+        const estado = (order.estado || "pendiente").toString();
         const estadoLower = estado.toLowerCase();
 
-        // Contar ventas
         if (created && !isNaN(created.getTime())) {
           const y = created.getFullYear();
           const m = created.getMonth();
@@ -138,48 +173,52 @@ function generarDashboardPedidos() {
         }
 
         const idPedido = order.idPedido || key;
-        const cliente  = order.cliente || order.userEmail || "Sin cliente";
-        const resumen  = order.resumen || "Sin resumen";
+        const cliente = order.cliente || order.userEmail || "Sin cliente";
+        const resumen = order.resumen || "Sin resumen";
         const estadoClass = estadoLower.replace(/\s+/g, "-");
 
         const optionsHtml = ORDER_STATUSES.map(st => `
-          <option value="${st}" ${st === estadoLower ? "selected" : ""}>
-            ${st}
-          </option>
+          <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>
         `).join("");
 
+        // añadimos data-order-uid para poder actualizar / borrar la orden correctamente
         tbody.innerHTML += `
-  <tr data-order-key="${escapeHtml(key)}">
-    <td>${escapeHtml(String(idPedido))}</td>
-    <td>${escapeHtml(String(cliente))}</td>
-    <td>${escapeHtml(String(resumen))}</td>
-    <td>$${Number(total || 0).toLocaleString()}</td>
-    <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
-    <td>
-      <div class="order-actions">
-        <select class="order-status-select" data-order-key="${key}">
-          ${optionsHtml}
-        </select>
-        <button class="order-edit-btn" data-order-key="${key}" title="Editar pedido">✎</button>
-        <button class="order-delete-btn" data-order-key="${key}" title="Eliminar pedido">🗑</button>
-      </div>
-    </td>
-  </tr>
+<tr data-order-key="${escapeHtml(key)}" data-order-uid="${escapeHtml(uid)}">
+  <td>${escapeHtml(String(idPedido))}</td>
+  <td>${escapeHtml(String(cliente))}</td>
+  <td>${escapeHtml(String(resumen))}</td>
+  <td>$${Number(total || 0).toLocaleString()}</td>
+  <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
+  <td>
+    <div class="order-actions">
+      <select class="order-status-select" data-order-key="${key}" data-order-uid="${uid}">
+        ${optionsHtml}
+      </select>
+      <button class="order-edit-btn" data-order-key="${key}" data-order-uid="${uid}" title="Editar pedido">✎</button>
+      <button class="order-delete-btn" data-order-key="${key}" data-order-uid="${uid}" title="Eliminar pedido">🗑</button>
+    </div>
+  </td>
+</tr>
 `;
       });
     }
 
     if (ventasDiaEl) ventasDiaEl.textContent = totalDia.toLocaleString();
     if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
-    if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
+    if (pedidosEl) pedidosEl.textContent = totalPedidos;
 
     // Listeners para selects de estado
     tbody.querySelectorAll(".order-status-select").forEach(sel => {
       sel.onchange = async () => {
         const key = sel.dataset.orderKey;
+        const uid = sel.dataset.orderUid;
         const newStatus = sel.value;
-        try { await updateOrderStatus(key, newStatus); }
-        catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
+        try {
+          await updateOrderStatus(uid, key, newStatus);
+        } catch (e) {
+          console.error("Error actualizando estado:", e);
+          alert("No se pudo actualizar el estado. Revisa la consola.");
+        }
       };
     });
 
@@ -187,11 +226,12 @@ function generarDashboardPedidos() {
     tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
+        const uid = btn.dataset.orderUid;
         try {
-          const snap = await get(ref(db, `orders/${key}`));
+          const snap = await get(ref(db, `users/${uid}/orders/${key}`));
           const order = snap.val();
           if (!order) return alert("Pedido no encontrado.");
-          openEditOrderModal(key, order);
+          openEditOrderModal(uid, key, order);
         } catch (e) {
           console.error("Error cargando pedido para editar:", e);
           alert("No se pudo cargar el pedido. Revisa la consola.");
@@ -203,22 +243,27 @@ function generarDashboardPedidos() {
     tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
+        const uid = btn.dataset.orderUid;
         if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
-        try { await deleteOrder(key); }
-        catch (e) { console.error("Error eliminando pedido:", e); alert("No se pudo eliminar el pedido. Revisa la consola."); }
+        try {
+          await deleteOrder(uid, key);
+          alert("Pedido eliminado.");
+        } catch (e) {
+          console.error("Error eliminando pedido:", e);
+          alert("No se pudo eliminar el pedido. Revisa la consola.");
+        }
       };
     });
   }, (error) => {
-    console.error("Error leyendo orders:", error);
+    console.error("Error leyendo users/*/orders:", error);
 
-    // Si es permission_denied, mostrar mensaje claro con uid para debug
     if (error && error.code && error.code === "permission_denied") {
       const currentUser = auth.currentUser;
       const uid = currentUser ? currentUser.uid : "no-uid";
       tbody.innerHTML = `
         <tr>
           <td colspan="6" style="text-align:center;color:#f55">
-            Error: permission_denied al leer /orders. UID actual: ${escapeHtml(String(uid))}. Revisa las reglas de Realtime DB o asigna admin claim/admins node.
+            Error: permission_denied al leer users/*/orders. UID actual: ${escapeHtml(String(uid))}. Revisa las reglas de Realtime DB.
           </td>
         </tr>
       `;
@@ -234,48 +279,39 @@ function generarDashboardPedidos() {
   });
 }
 
-// Actualizar estado en Firebase (ahora también sincroniza con /users/{uid}/orders/{key} si aplica)
-async function updateOrderStatus(orderKey, newStatus) {
-  const orderRef = ref(db, `orders/${orderKey}`);
+// Actualizar estado en Firebase (se opera sobre users/{uid}/orders/{key})
+async function updateOrderStatus(uid, orderKey, newStatus) {
+  const orderPath = `users/${uid}/orders/${orderKey}`;
   try {
-    // obtener orden actual para conocer uid
-    const snap = await get(orderRef);
-    const order = snap.val() || {};
-    await update(orderRef, { estado: newStatus });
-
-    // sincronizar copia en users node si existe uid
-    const uid = order.uid;
-    if (uid) {
-      try {
-        await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
-      } catch (e) {
-        console.warn("No se pudo actualizar users/{uid}/orders copy:", e);
-      }
-    }
-
+    await update(ref(db, orderPath), { estado: newStatus });
     console.log(`[admin] order ${orderKey} status updated -> ${newStatus}`);
+
+    // (Opcional) Si existiera una copia en /orders/{orderKey} y quieres eliminarla, descomenta:
+    // try { await remove(ref(db, `orders/${orderKey}`)); } catch(e){ /* no fatal */ }
+
   } catch (err) {
     console.error("updateOrderStatus error:", err);
     throw err;
   }
 }
 
-// Eliminar pedido en Firebase (también borra copia en users/{uid}/orders si existe)
-async function deleteOrder(orderKey) {
+// Eliminar pedido en Firebase (borra users/{uid}/orders/{key})
+async function deleteOrder(uid, orderKey) {
   try {
-    const snap = await get(ref(db, `orders/${orderKey}`));
-    const order = snap.val() || {};
+    await remove(ref(db, `users/${uid}/orders/${orderKey}`));
+    console.log("[admin] order deleted (users node):", orderKey);
 
-    await remove(ref(db, `orders/${orderKey}`));
-
-    if (order && order.uid) {
-      try {
-        await remove(ref(db, `users/${order.uid}/orders/${orderKey}`));
-      } catch (e) {
-        console.warn("No se pudo eliminar copia en users/{uid}/orders:", e);
+    // (Opcional) Si existiera la copia legacy en /orders, intenta eliminarla también (no obligatorio)
+    try {
+      const legacySnap = await get(ref(db, `orders/${orderKey}`));
+      if (legacySnap.exists()) {
+        await remove(ref(db, `orders/${orderKey}`));
+        console.log("[admin] removed legacy /orders copy:", orderKey);
       }
+    } catch (e) {
+      console.warn("No se pudo limpiar legacy /orders:", e);
     }
-    console.log("[admin] order deleted:", orderKey);
+
   } catch (err) {
     console.error("deleteOrder error:", err);
     throw err;
@@ -283,7 +319,7 @@ async function deleteOrder(orderKey) {
 }
 
 // ----------------------------------------------------
-// Modal de edición de pedido (dinámico) - actualizado para nuevo esquema shipping
+// Modal de edición de pedido (dinámico) - nuevo esquema shipping
 // ----------------------------------------------------
 function ensureOrderEditModalExists() {
   if (document.getElementById("order-edit-modal-overlay")) return;
@@ -311,15 +347,14 @@ function ensureOrderEditModalExists() {
   };
 }
 
-// abre modal con datos de orden
-function openEditOrderModal(orderKey, order) {
+// abre modal con datos de orden (acepta uid y key)
+function openEditOrderModal(uid, orderKey, order) {
   ensureOrderEditModalExists();
   const overlay = document.getElementById("order-edit-modal-overlay");
   const body = document.getElementById("order-edit-body");
 
   // Normalizar shipping: soporta esquema nuevo y legacy
   const shippingRaw = order.shipping || order.direccion || order.delivery || {};
-  // posible contenido legacy: { addressLine, city, state, postalCode, phone, fullAddress, notas, telefono, name, cliente }
   const fullName =
     shippingRaw.fullName ||
     shippingRaw.name ||
@@ -333,7 +368,6 @@ function openEditOrderModal(orderKey, order) {
     shippingRaw.contactPhone ||
     shippingRaw.mobile ||
     "";
-  // preferimos address field variants in this order
   const address =
     shippingRaw.address ||
     shippingRaw.addressLine ||
@@ -423,7 +457,6 @@ function openEditOrderModal(orderKey, order) {
     const notesNew = document.getElementById("order-edit-notes").value.trim();
 
     const shippingObj = {
-      // only include keys if value not empty (keep object minimal)
       ...(fullNameNew ? { fullName: fullNameNew } : {}),
       ...(phoneNew ? { phone: phoneNew } : {}),
       ...(addressNew ? { address: addressNew, addressLine: addressNew } : {}),
@@ -431,16 +464,19 @@ function openEditOrderModal(orderKey, order) {
     };
 
     try {
-      // actualizar orders/{key}
-      await update(ref(db, `orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
+      // actualizar users/{uid}/orders/{orderKey}
+      await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
 
-      // si hay uid, actualizar la copia en users/{uid}/orders/{key}
-      if (order.uid) {
-        try {
-          await update(ref(db, `users/${order.uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
-        } catch (e) {
-          console.warn("No se pudo actualizar la copia en users/{uid}/orders:", e);
+      // (Si queda alguna copia legacy en /orders/{orderKey}, opcionalmente actualizamos/limpiamos)
+      try {
+        const legacySnap = await get(ref(db, `orders/${orderKey}`));
+        if (legacySnap.exists()) {
+          // opcional: actualizar la copia legacy también (o eliminar)
+          await update(ref(db, `orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
         }
+      } catch (e) {
+        // no fatal
+        console.warn("No se pudo actualizar/limpiar legacy /orders:", e);
       }
 
       overlay.style.display = "none";
@@ -459,10 +495,11 @@ function openEditOrderModal(orderKey, order) {
 }
 
 // -----------------------------------------------------------
-// Cargar productos desde Sheets
-//-----------------------------------------------------------
+// Cargar productos desde Sheets (sin cambios)
+// -----------------------------------------------------------
 async function loadProducts() {
   const tbody = document.getElementById("product-table-body");
+  if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="6" style="text-align:center">Cargando...</td></tr>`;
 
   try {
@@ -480,13 +517,13 @@ async function loadProducts() {
     renderProductsTable();
   } catch (err) {
     console.error(err);
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#f55;text-align:center;">Error cargando productos</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="color:#f55;text-align:center;">Error cargando productos</td></tr>`;
   }
 }
 
-//-----------------------------------------------------------
-// Filtros + Tabla de productos
-//-----------------------------------------------------------
+// -----------------------------------------------------------
+// Filtros + Tabla de productos (sin cambios)
+// -----------------------------------------------------------
 function fillProductCategoryFilter() {
   const select = document.getElementById("product-category-filter");
   const cats = [...new Set(allProducts.map(p => p.sheetKey))];
@@ -497,7 +534,7 @@ function fillProductCategoryFilter() {
 
 function applyProductFilters() {
   const term = document.getElementById("product-search").value.toLowerCase();
-  const cat  = document.getElementById("product-category-filter").value;
+  const cat = document.getElementById("product-category-filter").value;
 
   filteredProducts = allProducts.filter(p => {
     const name = (p.data.Nombre || "").toLowerCase();
@@ -509,6 +546,7 @@ function applyProductFilters() {
 
 function renderProductsTable() {
   const tbody = document.getElementById("product-table-body");
+  if (!tbody) return;
 
   if (!filteredProducts.length)
     return tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">Sin resultados</td></tr>`;
@@ -542,7 +580,7 @@ function renderProductsTable() {
 }
 
 //-----------------------------------------------------------
-// CREAR / EDITAR PRODUCTO
+// CREAR / EDITAR PRODUCTO (sin cambios)
 //-----------------------------------------------------------
 function openCreateProductModal() {
   document.getElementById("product-modal-title").textContent = "Nuevo producto";
@@ -576,7 +614,7 @@ function clearForm() {
 }
 
 //-----------------------------------------------------------
-// GUARDAR en Sheets (ADD / UPDATE)
+// GUARDAR / ELIMINAR PRODUCTOS (sin cambios)
 //-----------------------------------------------------------
 async function onSubmitProductForm(e) {
   e.preventDefault();
@@ -611,9 +649,6 @@ async function onSubmitProductForm(e) {
   }
 }
 
-//-----------------------------------------------------------
-// ELIMINAR PRODUCTO
-//-----------------------------------------------------------
 async function deleteProduct(prod) {
   if (!confirm("¿Eliminar producto permanentemente?")) return;
 
@@ -635,6 +670,8 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
+
 
 
 
