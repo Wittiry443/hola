@@ -59,7 +59,7 @@ onAuthStateChanged(auth, async (user) => {
   if (label) label.textContent = user.email || "";
   initAdminUI();
 });
-
+await createOrderInDB(orderPayload, auth.currentUser);
 // UI Inicial
 function initAdminUI() {
   document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
@@ -405,5 +405,6 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
 
