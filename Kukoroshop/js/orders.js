@@ -19,27 +19,26 @@ if (!loadingEl || !listEl) {
 cartBtn?.addEventListener("click", () => { /* abrir carrito */ });
 adminBtn?.addEventListener("click", () => location.href = "admin.html");
 
-// Escuchar estado de autenticación una sola vez y manejar lógica
+// Escuchar estado de autenticación
 onAuthStateChanged(auth, async (user) => {
-  if (!user) {
-    // no autenticado -> redirigir
-    return window.location.href = "index.html";
-  }
+  if (!user) return window.location.href = "index.html";
 
   // Mostrar email en la UI (si existe)
   if (userLabel) userLabel.textContent = user.email || "";
 
-  // Forzar refresh del token por si cambió algún claim (no crítico)
-  try {
-    await auth.currentUser.getIdToken(true);
-  } catch (err) {
-    // no fatal; solo logueamos
-    console.warn("No se pudo refrescar token:", err);
-  }
+  // Forzar refresh del token por si cambió algún claim
+  try { await auth.currentUser.getIdToken(true); } catch (err) { console.warn("No se pudo refrescar token:", err); }
 
   // Iniciar la escucha de los pedidos del usuario
   listenUserOrders(user.uid, user.email || "");
 });
+
+// Función que obtiene info legible del usuario actual
+function getCurrentUserInfo() {
+  const u = auth.currentUser;
+  if (!u) return { uid: null, email: null, displayName: null };
+  return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
+}
 
 // Función que escucha/lee los pedidos del usuario
 function listenUserOrders(uid, email) {
@@ -78,13 +77,16 @@ function listenUserOrders(uid, email) {
         renderEmpty();
       }
     } catch (err) {
-      console.error("Error leyendo orders (fallback):", err);
-      renderError(err);
+      // fallback read error (por ejemplo permission_denied)
+      const ctx = getCurrentUserInfo();
+      console.error("Error leyendo orders (fallback):", err, "requesting user:", ctx);
+      renderError(err, ctx);
     }
   }, (err) => {
     // onValue error (p.ej. permission_denied)
-    console.error("Error listening user orders:", err);
-    renderError(err);
+    const ctx = getCurrentUserInfo();
+    console.error("Error listening user orders:", err, "requesting user:", ctx);
+    renderError(err, ctx);
   });
 }
 
@@ -153,9 +155,19 @@ function renderEmpty() {
   if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#777;text-align:center">No tienes pedidos registrados todavía.</div>`;
 }
 
-function renderError(err) {
+function renderError(err, userCtx = null) {
   loadingEl && (loadingEl.style.display = "none");
   listEl && (listEl.style.display = "block");
   const msg = (err && err.message) ? escapeHtml(err.message) : "Error desconocido";
-  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f55;text-align:center">No se pudieron cargar tus pedidos: ${msg}</div>`;
+
+  // Construir cadena adicional con info del usuario que hizo la request
+  let userInfoHtml = "";
+  if (userCtx) {
+    const u = escapeHtml(String(userCtx.uid || "null"));
+    const e = escapeHtml(String(userCtx.email || "null"));
+    const d = escapeHtml(String(userCtx.displayName || "null"));
+    userInfoHtml = `<div style="margin-top:8px;font-size:12px;color:#999">Request user — uid: ${u} · email: ${e} · name: ${d}</div>`;
+  }
+
+  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f55;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
 }
