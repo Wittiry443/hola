@@ -1430,3 +1430,49 @@ footer p {
   color: #fff;
   transform: translateY(-1px);
 }
+
+/* Contenedor de tarjeta de pedido */
+.order-card {
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(255,255,255,0.15);
+  transition: transform .15s ease, box-shadow .2s ease;
+}
+
+.order-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.25);
+}
+
+/* Texto interno */
+.order-card div,
+.order-card span {
+  color: #e9e9e9;
+}
+
+/* Estado */
+.order-card .estado {
+  background: rgba(255,255,255,0.25) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+/* Botón "Ver Factura" */
+.btn-view-invoice {
+  background: rgba(255,255,255,0.85) !important;
+  border: none;
+  color: #333 !important;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+}
+
+.btn-view-invoice:hover {
+  background: white !important;
+  color: #000 !important;
+}
+
