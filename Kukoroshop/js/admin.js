@@ -214,7 +214,7 @@ function generarDashboardPedidos() {
           const snap = await get(ref(db, `users/${uid}/orders/${key}`));
           const order = snap.val();
           if (!order) return alert("Pedido no encontrado.");
-          openEditOrderModal(key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
+          openEditOrderModal(uid, key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
         } catch (e) {
           console.error("Error cargando pedido para editar:", e);
           alert("No se pudo cargar el pedido. Revisa la consola.");
@@ -611,6 +611,7 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
 
 
