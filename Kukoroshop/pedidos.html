@@ -2,69 +2,15 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>Mis pedidos — Kukoro-shop</title>
 
   <link rel="stylesheet" href="styles.css" />
-  <style>
-    /* Caja estilizada para pedidos */
-    #my-orders-section.card {
-      border-radius: 12px;
-      background: #ffffff;
-      border: 1px solid rgba(0,0,0,0.1);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      padding: 20px;
-      margin-top: 20px;
-      transition: box-shadow 0.25s ease;
-    }
-
-    #my-orders-section.card:hover {
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-    }
-
-    /* Contenedor interno de pedidos */
-    #orders-list {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    /* Tarjetica para cada pedido */
-    .order-card {
-      background: #fafafa;
-      border-radius: 10px;
-      padding: 16px;
-      border: 1px solid #e4e4e4;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      transition: background 0.2s ease;
-    }
-
-    .order-card:hover {
-      background: #f2f2f2;
-    }
-
-    .order-header {
-      font-size: 16px;
-      font-weight: bold;
-      color: #333;
-    }
-
-    .order-detail {
-      font-size: 14px;
-      color: #555;
-    }
-
-    .order-status {
-      margin-top: 4px;
-      font-weight: bold;
-      color: #0080ff;
-    }
-  </style>
   <script type="module" src="js/orders.js"></script>
 </head>
+
 <body>
+  <!-- HEADER -->
   <header>
     <nav>
       <div class="logo">Kukoro-shop</div>
@@ -74,24 +20,28 @@
       <div class="nav-right">
         <button id="login-btn" class="login-btn">Iniciar sesión</button>
         <span id="user-label" class="user-label"></span>
-        <button id="cart-icon-btn" class="cart-icon" aria-label="Abrir carrito">Carrito (0)</button>
-        <button id="orders-btn" class="cart-icon" aria-label="Mis pedidos" title="Mis pedidos"> Mis pedidos</button>
+        <button id="cart-icon-btn" class="cart-icon">Carrito (0)</button>
+        <button id="orders-btn" class="cart-icon">Mis pedidos</button>
       </div>
     </nav>
   </header>
 
-  <main class="container" style="padding:28px 16px;">
-    <h1 style="margin-bottom:14px">Mis pedidos</h1>
+  <!-- CONTENIDO -->
+  <main class="container">
+    <h1 class="section-title">Mis pedidos</h1>
 
     <section id="my-orders-section" class="card">
-      <div id="orders-loading" style="padding:28px;text-align:center;color:#999;">
+
+      <div id="orders-loading" class="orders-loading-text">
         Cargando tus pedidos...
       </div>
 
-      <div id="orders-list" style="display:none; padding:8px;"></div>
+      <div id="orders-list" class="orders-list"></div>
+
     </section>
   </main>
 
+  <!-- FOOTER -->
   <footer class="footer">
     <div class="footer-links">
       <a href="sobre-nosotros.html">SOBRE NOSOTROS</a>
@@ -102,10 +52,15 @@
     <p class="footer-copy">© 2025 Kukoro-shop. Todos los derechos reservados.</p>
   </footer>
 
-  <!-- Mantén si usas popup carrito / auth modal del index -->
+  <!-- Scripts navegación -->
   <script>
-    document.getElementById("logo")?.addEventListener?.("click", ()=> location.href="index.html");
-    document.getElementById("orders-btn").onclick = () => location.href = "pedidos.html";
+    document.querySelector(".logo")?.addEventListener("click", () => {
+      location.href = "index.html";
+    });
+
+    document.getElementById("orders-btn").onclick = () =>
+      (location.href = "pedidos.html");
   </script>
 </body>
 </html>
+
