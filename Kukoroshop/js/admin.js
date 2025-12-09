@@ -1,6 +1,6 @@
-// js/admin.js (versión mejorada)
+// js/admin.js (actualizado)
 // importaciones
-import { auth, onAuthStateChanged, db } from "./firebase.js";
+import { auth, onAuthStateChanged, db, ensureUserRecord } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
 import { fmtPrice, escapeHtml } from "./utils.js";
@@ -9,7 +9,8 @@ import {
   onValue,
   update,
   remove,
-  get
+  get,
+  set
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 import { getIdTokenResult } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
@@ -46,8 +47,8 @@ onAuthStateChanged(auth, async (user) => {
   const label = document.getElementById("admin-user-label");
   if (!user) return (window.location.href = "index.html");
 
-  // Guardar/actualizar registro base del usuario (client)
-  try { await ensureUserRecord(user); } catch(e){ console.warn("ensureUserRecord fail", e); }
+  // Guardar/actualizar registro base del usuario (client) - no crítico
+  try { if (typeof ensureUserRecord === "function") await ensureUserRecord(user); } catch(e){ console.warn("ensureUserRecord fail", e); }
 
   // comprobar admin real
   const isAdmin = await isAdminUser(user);
@@ -59,7 +60,7 @@ onAuthStateChanged(auth, async (user) => {
   if (label) label.textContent = user.email || "";
   initAdminUI();
 });
-await createOrderInDB(orderPayload, auth.currentUser);
+
 // UI Inicial
 function initAdminUI() {
   document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
@@ -148,7 +149,7 @@ function generarDashboardPedidos() {
         `).join("");
 
         tbody.innerHTML += `
-  <tr>
+  <tr data-order-key="${escapeHtml(key)}">
     <td>${escapeHtml(String(idPedido))}</td>
     <td>${escapeHtml(String(cliente))}</td>
     <td>${escapeHtml(String(resumen))}</td>
@@ -159,6 +160,7 @@ function generarDashboardPedidos() {
         <select class="order-status-select" data-order-key="${key}">
           ${optionsHtml}
         </select>
+        <button class="order-edit-btn" data-order-key="${key}" title="Editar pedido">✎</button>
         <button class="order-delete-btn" data-order-key="${key}" title="Eliminar pedido">🗑</button>
       </div>
     </td>
@@ -178,6 +180,22 @@ function generarDashboardPedidos() {
         const newStatus = sel.value;
         try { await updateOrderStatus(key, newStatus); }
         catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
+      };
+    });
+
+    // Listeners para editar pedido
+    tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const key = btn.dataset.orderKey;
+        try {
+          const snap = await get(ref(db, `orders/${key}`));
+          const order = snap.val();
+          if (!order) return alert("Pedido no encontrado.");
+          openEditOrderModal(key, order);
+        } catch (e) {
+          console.error("Error cargando pedido para editar:", e);
+          alert("No se pudo cargar el pedido. Revisa la consola.");
+        }
       };
     });
 
@@ -216,18 +234,223 @@ function generarDashboardPedidos() {
   });
 }
 
-// Actualizar estado en Firebase
+// Actualizar estado en Firebase (ahora también sincroniza con /users/{uid}/orders/{key} si aplica)
 async function updateOrderStatus(orderKey, newStatus) {
   const orderRef = ref(db, `orders/${orderKey}`);
-  await update(orderRef, { estado: newStatus });
+  try {
+    // obtener orden actual para conocer uid
+    const snap = await get(orderRef);
+    const order = snap.val() || {};
+    await update(orderRef, { estado: newStatus });
+
+    // sincronizar copia en users node si existe uid
+    const uid = order.uid;
+    if (uid) {
+      try {
+        await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
+      } catch (e) {
+        console.warn("No se pudo actualizar users/{uid}/orders copy:", e);
+      }
+    }
+
+    console.log(`[admin] order ${orderKey} status updated -> ${newStatus}`);
+  } catch (err) {
+    console.error("updateOrderStatus error:", err);
+    throw err;
+  }
 }
 
-// Eliminar pedido en Firebase
+// Eliminar pedido en Firebase (también borra copia en users/{uid}/orders si existe)
 async function deleteOrder(orderKey) {
-  const orderRef = ref(db, `orders/${orderKey}`);
-  await remove(orderRef);
+  try {
+    const snap = await get(ref(db, `orders/${orderKey}`));
+    const order = snap.val() || {};
+
+    await remove(ref(db, `orders/${orderKey}`));
+
+    if (order && order.uid) {
+      try {
+        await remove(ref(db, `users/${order.uid}/orders/${orderKey}`));
+      } catch (e) {
+        console.warn("No se pudo eliminar copia en users/{uid}/orders:", e);
+      }
+    }
+    console.log("[admin] order deleted:", orderKey);
+  } catch (err) {
+    console.error("deleteOrder error:", err);
+    throw err;
+  }
 }
 
+// ----------------------------------------------------
+// Modal de edición de pedido (dinámico)
+// ----------------------------------------------------
+function ensureOrderEditModalExists() {
+  if (document.getElementById("order-edit-modal-overlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "order-edit-modal-overlay";
+  overlay.style = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:30000;";
+  overlay.innerHTML = `
+    <div id="order-edit-modal" style="width:92%;max-width:720px;background:#fff;border-radius:10px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+      <h3 id="order-edit-title" style="margin:0 0 8px 0">Editar pedido</h3>
+      <div id="order-edit-body" style="max-height:60vh;overflow:auto"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+        <button id="order-edit-cancel" class="btn-ghost btn-small">Cancelar</button>
+        <button id="order-edit-save" class="btn-primary btn-small">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#order-edit-cancel").onclick = () => {
+    overlay.style.display = "none";
+  };
+  overlay.onclick = (e) => {
+    if (e.target === overlay) overlay.style.display = "none";
+  };
+}
+
+// abre modal con datos de orden
+function openEditOrderModal(orderKey, order) {
+  ensureOrderEditModalExists();
+  const overlay = document.getElementById("order-edit-modal-overlay");
+  const body = document.getElementById("order-edit-body");
+
+  // normalizar shipping/direccion
+  const shipping = order.shipping || order.direccion || order.delivery || {};
+  const addr = {
+    addressLine: shipping.addressLine || shipping.calle || shipping.line || "",
+    city: shipping.city || shipping.ciudad || shipping.city || "",
+    state: shipping.state || shipping.departamento || shipping.state || "",
+    postalCode: shipping.postalCode || shipping.codigoPostal || shipping.postalCode || "",
+    phone: shipping.phone || shipping.telefono || shipping.phone || ""
+  };
+
+  const optionsHtml = ORDER_STATUSES.map(st => `<option value="${st}" ${st === (order.estado || "pendiente") ? "selected" : ""}>${st}</option>`).join("");
+
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label style="display:block;font-weight:700;margin-bottom:6px">ID Pedido</label>
+        <div style="padding:8px;border-radius:6px;background:#f7f7f7">${escapeHtml(order.idPedido || orderKey)}</div>
+      </div>
+      <div>
+        <label style="display:block;font-weight:700;margin-bottom:6px">Cliente</label>
+        <div style="padding:8px;border-radius:6px;background:#f7f7f7">${escapeHtml(order.cliente || order.userEmail || "")}</div>
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label style="display:block;font-weight:700;margin-bottom:6px">Resumen</label>
+      <textarea id="order-edit-resumen" rows="3" style="width:100%;padding:8px;border-radius:6px" readonly>${escapeHtml(order.resumen || "")}</textarea>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:10px;">
+      <div style="flex:1">
+        <label style="display:block;font-weight:700;margin-bottom:6px">Estado</label>
+        <select id="order-edit-estado" style="width:100%;padding:8px;border-radius:6px">${optionsHtml}</select>
+      </div>
+      <div style="width:160px">
+        <label style="display:block;font-weight:700;margin-bottom:6px">Total</label>
+        <div style="padding:8px;border-radius:6px;background:#f7f7f7">$${Number(order.total || 0).toLocaleString()}</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <h4 style="margin:0 0 8px 0">Dirección de envío</h4>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <label style="display:block;font-weight:700;margin-bottom:6px">Calle / Dirección</label>
+          <input id="order-edit-addressLine" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.addressLine)}" />
+        </div>
+        <div>
+          <label style="display:block;font-weight:700;margin-bottom:6px">Ciudad</label>
+          <input id="order-edit-city" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.city)}" />
+        </div>
+        <div>
+          <label style="display:block;font-weight:700;margin-bottom:6px">Departamento / Estado</label>
+          <input id="order-edit-state" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.state)}" />
+        </div>
+        <div>
+          <label style="display:block;font-weight:700;margin-bottom:6px">Código postal</label>
+          <input id="order-edit-postalCode" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.postalCode)}" />
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label style="display:block;font-weight:700;margin-bottom:6px">Teléfono</label>
+          <input id="order-edit-phone" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.phone)}" />
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label style="display:block;font-weight:700;margin-bottom:6px">Notas internas / dirección completa (opcional)</label>
+      <textarea id="order-edit-notes" rows="3" style="width:100%;padding:8px;border-radius:6px">${escapeHtml((shipping.fullAddress || shipping.notas || ""))}</textarea>
+    </div>
+  `;
+
+  // show overlay
+  overlay.style.display = "flex";
+
+  // save handler
+  const saveBtn = overlay.querySelector("#order-edit-save");
+  const cancelBtn = overlay.querySelector("#order-edit-cancel");
+
+  // remove previous handlers to avoid duplicates
+  saveBtn.onclick = null;
+  cancelBtn.onclick = null;
+
+  saveBtn.onclick = async () => {
+    const newEstado = document.getElementById("order-edit-estado").value;
+    const addressLine = document.getElementById("order-edit-addressLine").value.trim();
+    const city = document.getElementById("order-edit-city").value.trim();
+    const state = document.getElementById("order-edit-state").value.trim();
+    const postalCode = document.getElementById("order-edit-postalCode").value.trim();
+    const phone = document.getElementById("order-edit-phone").value.trim();
+    const notes = document.getElementById("order-edit-notes").value.trim();
+
+    const shippingObj = {
+      addressLine: addressLine || null,
+      city: city || null,
+      state: state || null,
+      postalCode: postalCode || null,
+      phone: phone || null,
+      fullAddress: notes || null
+    };
+
+    // limpiar nulls innecesarios
+    Object.keys(shippingObj).forEach(k => { if (shippingObj[k] === null) delete shippingObj[k]; });
+
+    try {
+      // actualizar orders/{key}
+      await update(ref(db, `orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
+
+      // si hay uid, actualizar la copia en users/{uid}/orders/{key}
+      if (order.uid) {
+        try {
+          await update(ref(db, `users/${order.uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
+        } catch (e) {
+          console.warn("No se pudo actualizar la copia en users/{uid}/orders:", e);
+        }
+      }
+
+      overlay.style.display = "none";
+      // re-render tabla (simple)
+      generarDashboardPedidos();
+      alert("Pedido actualizado correctamente.");
+    } catch (err) {
+      console.error("Error guardando cambios del pedido:", err);
+      alert("No se pudo guardar el pedido. Revisa la consola para detalles.");
+    }
+  };
+
+  cancelBtn.onclick = () => {
+    overlay.style.display = "none";
+  };
+}
+
+// -----------------------------------------------------------
+// Actualizar estado en Firebase (deprecated pero mantenido para compatibilidad)
 //-----------------------------------------------------------
 // Cargar productos desde Sheets
 //-----------------------------------------------------------
@@ -405,6 +628,7 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
 
 
