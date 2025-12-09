@@ -5,8 +5,7 @@ import {
   ref,
   onValue,
   get,
-  push,
-  update
+  push
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 // UI elements
@@ -19,90 +18,46 @@ const adminBtn = document.getElementById("admin-panel-btn");
 // Mapa local de pedidos cargados (key -> order)
 let currentOrdersMap = {};
 
-// ====== setup UI / modal de factura (inyecta estilos centralizados) ======
-(function setupInvoiceUI() {
-  if (document.getElementById("invoice-overlay")) return;
-
+// ====== setup UI / modal (estilos centralizados) ======
+(function setupUI() {
+  if (document.getElementById("invoice-styles")) return;
   const style = document.createElement("style");
   style.id = "invoice-styles";
   style.innerHTML = `
-/* Modal factura: armonizado con styles.css (tema oscuro) */
-.invoice-modal-overlay {
-  position: fixed; inset: 0; z-index: 99999;
-  display: none; justify-content: center; align-items: center;
-  background: linear-gradient(180deg, rgba(2,6,23,0.8), rgba(2,6,23,0.8));
-  padding: 20px;
-}
-.invoice-modal {
-  width: 100%; max-width: 760px; max-height: 90vh;
-  border-radius: 12px; display:flex; flex-direction:column;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 20% 0%, rgba(37,99,235,0.04), transparent 55%),
-    radial-gradient(circle at 80% 100%, rgba(168,85,247,0.02), transparent 60%),
-    #020617;
-  border: 1px solid rgba(148,163,184,0.06);
-  box-shadow: 0 20px 60px rgba(2,6,23,0.9);
-  color: #e5e7eb;
-  font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-.invoice-header {
-  padding: 14px 18px; display:flex; justify-content:space-between; align-items:center;
-  background: rgba(15,23,42,0.95); border-bottom: 1px solid rgba(148,163,184,0.03);
-}
-.invoice-header h3 { margin:0; font-size:18px; color:#e5e7eb; }
-.invoice-body {
-  padding: 16px 18px; overflow-y:auto; max-height: calc(90vh - 170px);
-  color: #d1d5db; font-size:14px; line-height:1.45;
-}
-.invoice-items-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
-.invoice-items-table th {
-  text-align:left; padding:8px; color:#9ca3af; font-weight:700;
-  border-bottom: 1px solid rgba(148,163,184,0.03);
-}
-.invoice-items-table td {
-  padding:10px 8px; color:#e9e9eb; border-bottom: 1px solid rgba(148,163,184,0.01);
-}
-.invoice-footer {
-  padding: 12px 18px; border-top: 1px solid rgba(148,163,184,0.03); text-align:right;
-  background: transparent;
-}
-.btn-invoice-action {
-  background: linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:8px 14px;
-  border-radius:8px; border:none; cursor:pointer; font-weight:700;
-}
-.btn-close-invoice {
-  background:transparent; border:none; font-size:22px; color:#e5e7eb; cursor:pointer;
-}
-.invoice-small { font-size:12px; color:#9ca3af; }
+/* Invoice + review modal (tema oscuro, coherente con styles.css) */
+.invoice-modal-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(2,6,23,0.8),rgba(2,6,23,0.8));z-index:99999;padding:18px}
+.invoice-modal{width:100%;max-width:760px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,0.06);box-shadow:0 20px 60px rgba(2,6,23,0.9);color:#e5e7eb;overflow:hidden;font-family:"Poppins",system-ui,Segoe UI}
+.invoice-header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:rgba(15,23,42,0.95);border-bottom:1px solid rgba(148,163,184,0.03)}
+.invoice-body{padding:16px 18px;max-height:60vh;overflow:auto;color:#d1d5db;font-size:14px}
+.invoice-footer{padding:12px 18px;border-top:1px solid rgba(148,163,184,0.03);text-align:right}
+.btn-invoice-action{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+.btn-close-invoice{background:transparent;border:none;color:#e5e7eb;font-size:20px;cursor:pointer}
+.invoice-items-table{width:100%;border-collapse:collapse;margin-top:12px}
+.invoice-items-table th{color:#9ca3af;padding:8px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.03)}
+.invoice-items-table td{padding:10px 8px;border-bottom:1px solid rgba(148,163,184,0.01);color:#e9e9eb}
 
-/* Review modal styles */
-.review-modal-overlay {
-  position: fixed; inset: 0; z-index: 100000; display: none; align-items:center; justify-content:center;
-  background: rgba(0,0,0,0.6);
-}
-.review-modal {
-  width: 100%; max-width: 560px; border-radius: 12px; padding: 14px; background: #020617; color:#e5e7eb;
-  border: 1px solid rgba(148,163,184,0.06); box-shadow: 0 20px 60px rgba(2,6,23,0.8);
-}
-.review-stars { display:flex; gap:6px; align-items:center; justify-content:flex-start; margin:12px 0; }
-.review-stars .star { font-size:28px; cursor:pointer; opacity:0.35; color:#fff; user-select:none; }
-.review-stars .star.filled { opacity:1; color:#fff; text-shadow:0 2px 8px rgba(125,90,255,0.25); }
-.review-comment { width:100%; padding:8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; min-height:80px; }
-.review-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
-.review-note { font-size:12px; color:#9ca3af; margin-top:8px; }
-@media (max-width:640px) {
-  .review-modal { max-width: 95%; }
-}
+/* Review modal */
+.review-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:100000;padding:12px}
+.review-box{width:100%;max-width:720px;background:#020617;border-radius:12px;padding:14px;border:1px solid rgba(148,163,184,0.06);box-shadow:0 20px 60px rgba(2,6,23,0.8);color:#e5e7eb}
+.review-item{border-radius:8px;padding:10px;background:rgba(15,23,42,0.6);margin-bottom:10px;display:flex;gap:12px;align-items:flex-start}
+.review-item h4{margin:0;font-size:15px}
+.stars{display:flex;gap:6px;align-items:center}
+.star{font-size:22px;cursor:pointer;opacity:0.35}
+.star.filled{opacity:1;text-shadow:0 2px 8px rgba(125,90,255,0.2)}
+.review-comment{width:100%;padding:8px;border-radius:8px;background:#0f172a;border:1px solid #1f2937;color:#e5e7eb;min-height:64px}
+.review-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.review-note{font-size:12px;color:#9ca3af;margin-top:6px}
+.readonly-stars{color:#fff;opacity:0.95;font-size:18px}
+@media(max-width:640px){.invoice-modal,.review-box{max-width:95%}}
   `;
   document.head.appendChild(style);
 
-  const modalHTML = `
-    <div id="invoice-overlay" class="invoice-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="invoice-modal" role="document" aria-labelledby="invoice-title">
+  const html = `
+    <div id="invoice-overlay" class="invoice-modal-overlay" aria-hidden="true">
+      <div class="invoice-modal" role="dialog" aria-modal="true" aria-labelledby="invoice-title">
         <div class="invoice-header">
-          <h3 id="invoice-title">Detalle de Factura</h3>
-          <div><button id="close-invoice-btn" class="btn-close-invoice" aria-label="Cerrar">&times;</button></div>
+          <h3 id="invoice-title" style="margin:0;color:#e5e7eb">Detalle de Factura</h3>
+          <button id="close-invoice-btn" class="btn-close-invoice" aria-label="Cerrar">&times;</button>
         </div>
         <div id="invoice-content" class="invoice-body" tabindex="0"></div>
         <div class="invoice-footer">
@@ -111,57 +66,41 @@ let currentOrdersMap = {};
       </div>
     </div>
 
-    <div id="review-overlay" class="review-modal-overlay" aria-hidden="true">
-      <div class="review-modal" role="dialog" aria-modal="true" id="review-modal" aria-labelledby="review-title">
-        <h3 id="review-title" style="margin:0 0 4px 0">Dejar reseña</h3>
-        <div id="review-body" style="margin-top:8px"></div>
+    <div id="review-overlay" class="review-overlay" aria-hidden="true">
+      <div class="review-box" role="dialog" aria-modal="true" id="review-box">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Dejar reseña</h3>
+          <button id="close-review-btn" class="btn-close-invoice" aria-label="Cerrar reseñas">&times;</button>
+        </div>
+        <div id="review-body" style="margin-top:10px;max-height:60vh;overflow:auto"></div>
+        <div class="review-actions" style="margin-top:8px">
+          <button id="review-cancel-btn" class="btn-invoice-action" style="background:transparent;border:1px solid rgba(148,163,184,0.06);color:#e5e7eb">Cerrar</button>
+          <button id="review-save-btn" class="btn-invoice-action">Guardar reseñas</button>
+        </div>
       </div>
     </div>
   `;
-  document.body.insertAdjacentHTML("beforeend", modalHTML);
+  document.body.insertAdjacentHTML("beforeend", html);
 
-  const overlay = document.getElementById("invoice-overlay");
-  const closeBtn = document.getElementById("close-invoice-btn");
-  const printBtn = document.getElementById("print-invoice-btn");
-  const reviewOverlay = document.getElementById("review-overlay");
+  // handlers
+  document.getElementById("close-invoice-btn").onclick = () => hideInvoice();
+  document.getElementById("invoice-overlay").onclick = (e) => { if (e.target.id === "invoice-overlay") hideInvoice();};
+  document.getElementById("print-invoice-btn").onclick = () => window.print();
 
-  function closeInvoice() {
-    if (!overlay) return;
-    overlay.style.display = "none";
-    overlay.setAttribute("aria-hidden", "true");
-    document.documentElement.style.overflow = "";
-    window.removeEventListener("keydown", onKeyDownInvoice);
-  }
-  function onKeyDownInvoice(e) { if (e.key === "Escape") closeInvoice(); }
-
-  if (closeBtn) closeBtn.addEventListener("click", closeInvoice);
-  if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) closeInvoice(); });
-  if (printBtn) printBtn.addEventListener("click", () => window.print());
-
-  // review overlay handlers
-  (function setupReviewOverlayHandlers() {
-    if (!reviewOverlay) return;
-    reviewOverlay.addEventListener("click", (e) => {
-      if (e.target === reviewOverlay) hideReviewModal();
-    });
-  })();
-
-  // helpers para abrir/cerrar desde showInvoiceDetails
-  window.__showInvoiceOverlay = function() {
-    if (!overlay) return;
-    overlay.style.display = "flex";
-    overlay.setAttribute("aria-hidden", "false");
-    document.documentElement.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDownInvoice);
-    const content = document.getElementById("invoice-content");
-    if (content) content.focus();
-  };
-  window.__hideInvoiceOverlay = closeInvoice;
+  document.getElementById("close-review-btn").onclick = () => hideReview();
+  document.getElementById("review-cancel-btn").onclick = () => hideReview();
+  document.getElementById("review-overlay").onclick = (e) => { if (e.target.id === "review-overlay") hideReview(); };
 })();
+
+// helpers de visibilidad
+function showInvoice() { const o = document.getElementById("invoice-overlay"); if (o){ o.style.display="flex"; o.setAttribute("aria-hidden","false"); document.documentElement.style.overflow="hidden"; } }
+function hideInvoice() { const o = document.getElementById("invoice-overlay"); if (o){ o.style.display="none"; o.setAttribute("aria-hidden","true"); document.documentElement.style.overflow=""; } }
+function showReview() { const r = document.getElementById("review-overlay"); if (r){ r.style.display="flex"; r.setAttribute("aria-hidden","false"); document.documentElement.style.overflow="hidden"; } }
+function hideReview() { const r = document.getElementById("review-overlay"); if (r){ r.style.display="none"; r.setAttribute("aria-hidden","true"); document.documentElement.style.overflow=""; const body = document.getElementById("review-body"); if (body) body.innerHTML=""; } }
 
 // Verificar elementos necesarios
 if (!loadingEl || !listEl) {
-  // no hacemos throw, solo evitamos fallos posteriores
+  console.warn("No se encontraron elementos DOM esperados para pedidos.");
 }
 
 // manejadores opcionales
@@ -183,7 +122,7 @@ function getCurrentUserInfo() {
   return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
 }
 
-// util: slugify simple (para fallback productKey)
+// util: slugify simple
 function slugify(s) {
   return String(s || "").toLowerCase().replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -195,7 +134,6 @@ function getProductKeyFromRaw(raw, name) {
     const s = String(cand).trim();
     if (s !== "" && s !== "-" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined") return s;
   }
-  // fallback slug
   return slugify(name);
 }
 
@@ -218,8 +156,16 @@ async function fetchExistingReview(productKey, uid) {
     return null;
   }
 }
+async function fetchExistingReviewsForKeys(keys, uid) {
+  // Promise.all para concurrencia
+  const results = {};
+  await Promise.all(keys.map(async (k) => {
+    results[k] = await fetchExistingReview(k, uid);
+  }));
+  return results; // map productKey -> {id,data} or null
+}
 
-async function createReview(productKey, productName, stars, comment) {
+async function createReview(productKey, productName, stars, comment, orderKey = null) {
   const user = auth.currentUser;
   if (!user) throw new Error("not_authenticated");
   const payload = {
@@ -227,17 +173,12 @@ async function createReview(productKey, productName, stars, comment) {
     stars: Number(stars || 0),
     comment: comment ? String(comment).trim() : "",
     user: { uid: user.uid, email: user.email || "" },
+    orderKey: orderKey || "",
     createdAt: Date.now()
   };
   const pRef = ref(db, `reviewsByProduct/${productKey}`);
   const pushed = await push(pRef, payload);
   return { id: pushed.key, data: payload };
-}
-
-async function updateReview(productKey, reviewId, payload) {
-  if (!productKey || !reviewId) throw new Error("invalid_params");
-  await update(ref(db, `reviewsByProduct/${productKey}/${reviewId}`), payload);
-  return true;
 }
 
 // Escuchar pedidos del usuario con fallback a /orders
@@ -306,7 +247,8 @@ function renderOrdersObject(obj) {
     const idPedido = order.idPedido || key;
     const cliente  = order.cliente || order.userEmail || "Sin cliente";
     const resumen  = order.resumen || summarizeOrder(order) || "Sin resumen";
-    const estado   = order.estado || order.status || "pendiente";
+    const estado   = (order.estado || order.status || "pendiente").toString();
+    const estadoLower = estado.toLowerCase();
     const total    = Number(order.total || 0);
 
     const createdTxt = order.createdAt
@@ -330,8 +272,9 @@ function renderOrdersObject(obj) {
         </div>
       </div>
       <div style="margin-top:10px;color:#cbd5e1;font-size:14px;">${escapeHtml(resumen)}</div>
-      <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;">
+      <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;display:flex;gap:8px;justify-content:flex-end;align-items:center">
         <button class="btn-view-invoice" data-order-key="${escapeHtml(String(key))}" style="background-color:rgba(255,255,255,0.95);border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:#111">📄 Ver Factura</button>
+        ${estadoLower === "entregado" ? `<button class="btn-open-reviews" data-order-key="${escapeHtml(String(key))}" style="padding:6px 10px;border-radius:6px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;cursor:pointer;font-size:13px">✍️ Dejar reseña</button>` : ""}
       </div>
     `;
     frag.appendChild(article);
@@ -339,31 +282,40 @@ function renderOrdersObject(obj) {
 
   listEl.appendChild(frag);
 
-  // delegación: un solo handler para todos los botones "Ver Factura"
+  // delegación de eventos: Ver Factura y Dejar reseña
   listEl.onclick = (e) => {
-    const btn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
-    if (!btn) return;
-    const orderKey = btn.dataset.orderKey;
-    if (!orderKey) return;
-    const order = currentOrdersMap[orderKey];
-    if (!order) return;
-    const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
-    showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
+    const viewBtn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
+    if (viewBtn) {
+      const orderKey = viewBtn.dataset.orderKey;
+      if (!orderKey) return;
+      const order = currentOrdersMap[orderKey];
+      if (!order) return;
+      const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
+      showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
+      return;
+    }
+
+    const reviewBtn = e.target.closest ? e.target.closest(".btn-open-reviews") : null;
+    if (reviewBtn) {
+      const orderKey = reviewBtn.dataset.orderKey;
+      if (!orderKey) return;
+      const order = currentOrdersMap[orderKey];
+      if (!order) return;
+      openOrderReviewsModal(orderKey, order);
+      return;
+    }
   };
 }
 
-// Mostrar modal con detalles (items normalizados + fallback resumen)
+// Mostrar modal con detalle de factura (igual que antes, sin botones individuales de review)
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
   if (!order || typeof order !== "object") return;
   const overlay = document.getElementById("invoice-overlay");
   const contentEl = document.getElementById("invoice-content");
   if (!overlay || !contentEl) return;
 
-  // Items: preferir order.items / order.cart
-  let rawItems = Array.isArray(order.items) ? order.items
-               : (Array.isArray(order.cart) ? order.cart : []);
-
-  // Normalizar items si existen
+  // normalizar items
+  let rawItems = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
   const itemsToRender = (rawItems || []).map(it => {
     const name = it.nombre || it.name || it.title || "Producto";
     const qtyRaw = (it.cantidad !== undefined) ? it.cantidad : (it.qty !== undefined ? it.qty : (it.quantity !== undefined ? it.quantity : null));
@@ -374,90 +326,48 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     return { name: String(name), qty, price, raw: it, productKey };
   });
 
+  // construir tabla
   let itemsHtml = "";
-
   if (itemsToRender.length) {
-    const orderEstadoLower = (order.estado || order.status || "pendiente").toString().toLowerCase();
     const rows = itemsToRender.map(it => {
       const nm = escapeHtml(it.name);
       const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
       const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
       const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
-
-      // ref: solo mostrar si existe y no es '-'/'null'/'undefined'/''
       let refCandidate = null;
       if (it.raw) {
         const possible = it.raw.id || it.raw.row || it.raw.sku || it.raw.ref;
         if (possible !== undefined && possible !== null) {
           const s = String(possible).trim();
-          if (s !== "" && s !== "-" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined") {
-            refCandidate = s;
-          }
+          if (s !== "" && s !== "-" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined") refCandidate = s;
         }
       }
-
-      // Si pedido está entregado, añadimos botón "Dejar reseña"
-      const reviewBtnHtml = (orderEstadoLower === "entregado")
-        ? `<div style="margin-top:8px"><button class="btn-review" data-product-key="${escapeHtml(it.productKey)}" data-product-name="${escapeHtml(it.name)}" style="padding:6px 10px;border-radius:8px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;cursor:pointer">⭐ Dejar reseña</button></div>`
-        : "";
-
       return `
         <tr>
           <td>
             <strong>${nm}</strong>
             ${refCandidate ? `<div class="invoice-small" style="margin-top:6px">Ref: ${escapeHtml(refCandidate)}</div>` : ""}
-            ${reviewBtnHtml}
           </td>
-          <td style="text-align:center;">${qtyTxt}</td>
-          <td style="text-align:right;">${priceTxt}</td>
-          <td style="text-align:right;">${lineTotalTxt}</td>
+          <td style="text-align:center">${qtyTxt}</td>
+          <td style="text-align:right">${priceTxt}</td>
+          <td style="text-align:right">${lineTotalTxt}</td>
         </tr>
       `;
     }).join("");
-
-    itemsHtml = `
-      <table class="invoice-items-table" role="table" aria-label="Items">
-        <thead>
-          <tr>
-            <th style="width:60%">Producto</th>
-            <th style="text-align:center;">Cant.</th>
-            <th style="text-align:right;">Precio</th>
-            <th style="text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+    itemsHtml = `<table class="invoice-items-table" role="table"><thead><tr><th style="width:60%">Producto</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Total</th></tr></thead><tbody>${rows}</tbody></table>`;
   } else if (order.resumen) {
-    // Fallback: parsear resumen string "1 x Nombre | 2 x Otro"
     const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
     const rows = parts.map(p => {
       const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
-      if (m) {
-        const qty = escapeHtml(m[1]);
-        const name = escapeHtml(m[2].trim());
-        return `<tr><td><strong>${name}</strong></td><td style="text-align:center;">${qty}</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
-      }
-      return `<tr><td><strong>${escapeHtml(p)}</strong></td><td style="text-align:center;">—</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+      if (m) return `<tr><td><strong>${escapeHtml(m[2].trim())}</strong></td><td style="text-align:center">${escapeHtml(m[1])}</td><td style="text-align:right">—</td><td style="text-align:right">—</td></tr>`;
+      return `<tr><td><strong>${escapeHtml(p)}</strong></td><td style="text-align:center">—</td><td style="text-align:right">—</td><td style="text-align:right">—</td></tr>`;
     }).join("");
-    itemsHtml = `
-      <table class="invoice-items-table" role="table" aria-label="Items">
-        <thead>
-          <tr>
-            <th style="width:60%">Producto</th>
-            <th style="text-align:center;">Cant.</th>
-            <th style="text-align:right;">Precio</th>
-            <th style="text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+    itemsHtml = `<table class="invoice-items-table" role="table"><thead><tr><th style="width:60%">Producto</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Total</th></tr></thead><tbody>${rows}</tbody></table>`;
   } else {
     itemsHtml = `<div style="text-align:center;padding:18px;color:#9ca3af">No hay detalle de items.</div>`;
   }
 
-  // Totales/cliente
+  // totales
   const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente");
   const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || "No especificada");
   const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || "—");
@@ -474,19 +384,11 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
       <div style="flex:1;min-width:180px">
         <strong style="display:block;margin-bottom:6px;color:#e5e7eb">Facturar a:</strong>
-        <div style="color:#cbd5e1;font-size:14px">
-          ${clienteNameDisplay}<br>
-          ${direccionDisplay}<br>
-          ${telefonoDisplay}
-        </div>
+        <div style="color:#cbd5e1">${clienteNameDisplay}<br>${direccionDisplay}<br>${telefonoDisplay}</div>
       </div>
       <div style="flex:1;min-width:180px;text-align:right">
         <strong style="display:block;margin-bottom:6px;color:#e5e7eb">Detalles:</strong>
-        <div style="color:#cbd5e1;font-size:14px">
-          ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>
-          Fecha: ${escapeHtml(String(dateDisplay))}<br>
-          Estado: ${escapeHtml(order.estado || order.status || "Pendiente")}
-        </div>
+        <div style="color:#cbd5e1">ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>Fecha: ${escapeHtml(String(dateDisplay))}<br>Estado: ${escapeHtml(order.estado || order.status || "Pendiente")}</div>
       </div>
     </div>
 
@@ -500,22 +402,7 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
   `;
 
   contentEl.innerHTML = html;
-  // mostrar modal
-  window.__showInvoiceOverlay();
-  // asegurar scroll top
-  const overlayElem = document.getElementById("invoice-overlay");
-  if (overlayElem) overlayElem.scrollTop = 0;
-  if (contentEl) contentEl.scrollTop = 0;
-
-  // Delegado dentro del contenido: manejar clicks en botones .btn-review
-  contentEl.onclick = async (ev) => {
-    const btn = ev.target.closest ? ev.target.closest(".btn-review") : null;
-    if (!btn) return;
-    const productKey = btn.dataset.productKey;
-    const productName = btn.dataset.productName;
-    if (!productKey) return;
-    openReviewModal(productKey, productName);
-  };
+  showInvoice();
 }
 
 // resumen para listar
@@ -552,115 +439,153 @@ function renderError(err, userCtx = null) {
   if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f97373;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
 }
 
-/* =============================
-   REVIEW MODAL (abrir / render / guardar)
-   ============================= */
-function getReviewModalElements() {
-  const overlay = document.getElementById("review-overlay");
-  const body = document.getElementById("review-body");
-  return { overlay, body };
-}
-
-async function openReviewModal(productKey, productName) {
+/* =========================
+   Modal de reseñas por pedido
+   - muestra cada producto del pedido
+   - si ya existe reseña (por uid) la muestra en read-only
+   - si no existe, permite crear (no editar)
+   ========================= */
+async function openOrderReviewsModal(orderKey, order) {
   const user = auth.currentUser;
   if (!user) { alert("Debes iniciar sesión para dejar reseñas."); return; }
+  if (!order) return;
 
-  const { overlay, body } = getReviewModalElements();
-  if (!overlay || !body) return;
+  // normalizar items
+  let rawItems = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
+  const itemsToRender = (rawItems || []).map(it => {
+    const name = it.nombre || it.name || it.title || "Producto";
+    const productKey = getProductKeyFromRaw(it, name);
+    return { name: String(name), raw: it, productKey, qty: it.cantidad || it.qty || it.quantity || null };
+  });
 
-  // limpiar
-  body.innerHTML = `<div style="color:#9ca3af">Cargando...</div>`;
-  overlay.style.display = "flex";
-  overlay.setAttribute("aria-hidden", "false");
+  if (!itemsToRender.length) {
+    alert("No hay productos para reseñar en este pedido.");
+    return;
+  }
 
-  // buscar reseña existente del usuario para este producto
-  const existing = await fetchExistingReview(productKey, user.uid);
+  const reviewBody = document.getElementById("review-body");
+  reviewBody.innerHTML = `<div style="color:#9ca3af">Cargando reseñas...</div>`;
+  showReview();
 
-  // construir UI
-  const existingNote = existing ? `<div class="review-note">Ya dejaste una reseña para este producto. Puedes editarla aquí.</div>` : `<div class="review-note">Puedes dejar una reseña pública para este producto. Solo una reseña por usuario.</div>`;
+  // fetch existing reviews para las keys
+  const keys = [...new Set(itemsToRender.map(i => i.productKey))];
+  const existingMap = await fetchExistingReviewsForKeys(keys, user.uid);
 
-  const initialStars = existing ? Number(existing.data.stars || 0) : 0;
-  const initialComment = existing ? (existing.data.comment || "") : "";
+  // construir UI por item (no editable si existe)
+  reviewBody.innerHTML = "";
+  // map para estado local de cada item nuevo a crear
+  const pendingMap = {}; // productKey -> {stars, comment, productName}
+  itemsToRender.forEach((it, idx) => {
+    const ex = existingMap[it.productKey];
+    const itemDiv = document.createElement("div");
+    itemDiv.className = "review-item";
+    itemDiv.dataset.productKey = it.productKey;
 
-  body.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div style="font-weight:700">${escapeHtml(productName)}</div>
-      <div style="font-size:12px;color:#9ca3af">Producto: <strong style="color:#e5e7eb">${escapeHtml(productKey)}</strong></div>
-    </div>
+    if (ex && ex.data) {
+      // mostrar reseña existente (solo lectura)
+      const stars = Number(ex.data.stars || 0);
+      const starsHtml = renderStaticStars(stars);
+      const commentHtml = ex.data.comment ? `<div style="margin-top:6px;color:#cbd5e1">${escapeHtml(ex.data.comment)}</div>` : `<div style="margin-top:6px;color:#9ca3af">Sin comentario</div>`;
+      itemDiv.innerHTML = `
+        <div style="flex:1">
+          <h4>${escapeHtml(it.name)}</h4>
+          <div class="readonly-stars">${starsHtml}</div>
+          ${commentHtml}
+          <div class="review-note">Ya dejaste esta reseña — no puede editarse.</div>
+        </div>
+      `;
+    } else {
+      // UI interactiva para crear reseña (solo si aún no existe)
+      const starsInputs = [1,2,3,4,5].map(n => `<span class="star" data-value="${n}" aria-label="${n}">${"★"}</span>`).join("");
+      itemDiv.innerHTML = `
+        <div style="flex:1">
+          <h4>${escapeHtml(it.name)}</h4>
+          <div class="stars" role="group" aria-label="Seleccionar estrellas">${starsInputs}</div>
+          <textarea class="review-comment" placeholder="Comentario (opcional)"></textarea>
+          <div class="review-note">Puedes dejar una reseña pública para este producto. Solo una reseña por usuario.</div>
+        </div>
+      `;
+      // inicializar estado vacío
+      pendingMap[it.productKey] = { stars: 0, comment: "", productName: it.name };
+    }
 
-    <div class="review-stars" id="review-stars" aria-label="Seleccionar calificación">
-      ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" role="button" aria-label="${n} estrellas">★</span>`).join("")}
-    </div>
+    reviewBody.appendChild(itemDiv);
+  });
 
-    <textarea id="review-comment" class="review-comment" placeholder="Escribe un comentario (opcional)">${escapeHtml(initialComment)}</textarea>
-
-    ${existingNote}
-
-    <div class="review-actions">
-      <button id="review-cancel" class="btn-ghost btn-small" style="background:transparent;border:1px solid rgba(148,163,184,0.06);color:#e5e7eb">Cerrar</button>
-      <button id="review-save" class="btn-invoice-action">${existing ? "Actualizar reseña" : "Guardar reseña"}</button>
-    </div>
-  `;
-
-  // set initial stars visual
-  setStarsUI(initialStars);
-
-  // handlers
-  const starsContainer = body.querySelector("#review-stars");
-  let currentStars = initialStars;
-
-  starsContainer.onclick = (e) => {
-    const s = e.target.closest && e.target.closest(".star");
-    if (!s) return;
-    const v = Number(s.dataset.value || 0);
-    currentStars = v;
-    setStarsUI(v);
+  // delegación: manejar clicks en stars interactivos y cambios en textarea
+  reviewBody.onclick = (ev) => {
+    const star = ev.target.closest ? ev.target.closest(".star") : null;
+    if (!star) return;
+    const val = Number(star.dataset.value || 0);
+    const item = star.closest(".review-item");
+    if (!item) return;
+    const key = item.dataset.productKey;
+    // pintar estrellas en este item
+    item.querySelectorAll(".star").forEach(s => {
+      const v = Number(s.dataset.value || 0);
+      if (v <= val) s.classList.add("filled"); else s.classList.remove("filled");
+    });
+    if (!pendingMap[key]) pendingMap[key] = { stars: 0, comment: "", productName: item.querySelector("h4")?.textContent || "" };
+    pendingMap[key].stars = val;
   };
 
-  body.querySelector("#review-cancel").onclick = () => {
-    hideReviewModal();
+  reviewBody.oninput = (ev) => {
+    const ta = ev.target.closest ? ev.target.closest(".review-comment") : null;
+    if (!ta) return;
+    const item = ta.closest(".review-item");
+    if (!item) return;
+    const key = item.dataset.productKey;
+    if (!pendingMap[key]) pendingMap[key] = { stars: 0, comment: "", productName: item.querySelector("h4")?.textContent || "" };
+    pendingMap[key].comment = ta.value;
   };
 
-  body.querySelector("#review-save").onclick = async () => {
+  // guardar: crear reseñas solo para las keys que no tenían y para las que el usuario haya seleccionado algo
+  const saveBtn = document.getElementById("review-save-btn");
+  saveBtn.onclick = async () => {
     try {
-      const comment = document.getElementById("review-comment").value || "";
-      if (!currentStars || currentStars < 1) {
-        if (!confirm("No seleccionaste estrellas. ¿Deseas enviar la reseña sin calificación?")) return;
+      // re-check: evitar race conditions - obtener existentes otra vez
+      const recheck = await fetchExistingReviewsForKeys(keys, auth.currentUser.uid);
+      const toCreate = [];
+      for (const k of keys) {
+        if (recheck[k]) continue; // ya existe -> no crear
+        const pending = pendingMap[k];
+        if (!pending) continue;
+        // only create if user gave stars or comment (you may allow empty stars+comment if you prefer)
+        if ((Number(pending.stars || 0) > 0) || (String(pending.comment || "").trim() !== "")) {
+          toCreate.push({ key: k, name: pending.productName, stars: Number(pending.stars || 0), comment: String(pending.comment || "").trim() });
+        }
       }
-      // si hay existing => update; si no => create
-      if (existing) {
-        const payload = { stars: Number(currentStars || 0), comment: comment, updatedAt: Date.now() };
-        await updateReview(productKey, existing.id, payload);
-        alert("Reseña actualizada.");
-      } else {
-        await createReview(productKey, productName, Number(currentStars || 0), comment);
-        alert("Reseña guardada.");
+
+      if (!toCreate.length) {
+        alert("No hay reseñas nuevas para guardar.");
+        return;
       }
-      hideReviewModal();
+
+      // create in series (could be parallel but simple sequential to avoid write storms)
+      for (const r of toCreate) {
+        try {
+          // passing orderKey for traceability
+          await createReview(r.key, r.name, r.stars, r.comment, orderKey);
+        } catch (e) {
+          console.error("No se pudo crear reseña para", r.key, e);
+        }
+      }
+
+      alert("Reseñas guardadas correctamente.");
+      // cerrar modal
+      hideReview();
     } catch (err) {
-      console.error("Error guardando reseña:", err);
-      alert("No se pudo guardar la reseña. Revisa la consola.");
+      console.error("Error guardando reseñas:", err);
+      alert("No se pudo guardar reseñas. Revisa la consola.");
     }
   };
 }
 
-function hideReviewModal() {
-  const { overlay, body } = getReviewModalElements();
-  if (!overlay) return;
-  overlay.style.display = "none";
-  overlay.setAttribute("aria-hidden", "true");
-  if (body) body.innerHTML = "";
-}
-
-// marcar estrellas UI
-function setStarsUI(n) {
-  const container = document.getElementById("review-body")?.querySelector?.("#review-stars");
-  if (!container) return;
-  container.querySelectorAll(".star").forEach(s => {
-    const v = Number(s.dataset.value || 0);
-    if (v <= n) s.classList.add("filled");
-    else s.classList.remove("filled");
-  });
+// render estrellas estáticas
+function renderStaticStars(n) {
+  let out = "";
+  for (let i=1;i<=5;i++) out += (i<=n) ? "★" : "☆";
+  return out;
 }
 
 export {}; // evita export accidental de variables globales en módulo
