@@ -5,7 +5,7 @@ import {
   ref,
   onValue,
   get,
-  push
+  set
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 // UI elements
@@ -34,7 +34,7 @@ let currentOrdersMap = {};
 .btn-close-invoice{background:transparent;border:none;color:#e5e7eb;font-size:20px;cursor:pointer}
 .invoice-items-table{width:100%;border-collapse:collapse;margin-top:12px}
 .invoice-items-table th{color:#9ca3af;padding:8px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.03)}
-.invoice-items-table td{padding:10px 8px;border-bottom:1px solid rgba(148,163,184,0.01);color:#e9e9eb}
+.invoice-items-table td{padding:10px 8px;border-bottom:1px solid rgba(148,163,184,0.01);color:#e9eeb}
 
 /* Review modal */
 .review-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:100000;padding:12px}
@@ -138,26 +138,19 @@ function getProductKeyFromRaw(raw, name) {
 }
 
 // DB helpers para reseñas
+// ahora se leen/escriben por UID: reviewsByProduct/{productKey}/{uid}
 async function fetchExistingReview(productKey, uid) {
   if (!productKey || !uid) return null;
   try {
-    const snap = await get(ref(db, `reviewsByProduct/${productKey}`));
+    const snap = await get(ref(db, `reviewsByProduct/${productKey}/${uid}`));
     if (!snap.exists()) return null;
-    const val = snap.val();
-    for (const k of Object.keys(val)) {
-      const r = val[k];
-      if (r && r.user && String(r.user.uid) === String(uid)) {
-        return { id: k, data: r };
-      }
-    }
-    return null;
+    return { id: uid, data: snap.val() };
   } catch (e) {
     console.warn("fetchExistingReview error:", e);
     return null;
   }
 }
 async function fetchExistingReviewsForKeys(keys, uid) {
-  // Promise.all para concurrencia
   const results = {};
   await Promise.all(keys.map(async (k) => {
     results[k] = await fetchExistingReview(k, uid);
@@ -168,6 +161,8 @@ async function fetchExistingReviewsForKeys(keys, uid) {
 async function createReview(productKey, productName, stars, comment, orderKey = null) {
   const user = auth.currentUser;
   if (!user) throw new Error("not_authenticated");
+
+  // payload
   const payload = {
     productName: productName || "",
     stars: Number(stars || 0),
@@ -176,9 +171,17 @@ async function createReview(productKey, productName, stars, comment, orderKey = 
     orderKey: orderKey || "",
     createdAt: Date.now()
   };
-  const pRef = ref(db, `reviewsByProduct/${productKey}`);
-  const pushed = await push(pRef, payload);
-  return { id: pushed.key, data: payload };
+
+  // Guardamos con la UID como clave: reviewsByProduct/{productKey}/{uid}
+  const path = `reviewsByProduct/${productKey}/${user.uid}`;
+  try {
+    await set(ref(db, path), payload);
+    console.debug("[reviews] created at", path);
+    return { id: user.uid, data: payload };
+  } catch (e) {
+    console.error("createReview set error:", e);
+    throw e;
+  }
 }
 
 // Escuchar pedidos del usuario con fallback a /orders
@@ -550,7 +553,7 @@ async function openOrderReviewsModal(orderKey, order) {
         if (recheck[k]) continue; // ya existe -> no crear
         const pending = pendingMap[k];
         if (!pending) continue;
-        // only create if user gave stars or comment (you may allow empty stars+comment if you prefer)
+        // only create if user gave stars or comment
         if ((Number(pending.stars || 0) > 0) || (String(pending.comment || "").trim() !== "")) {
           toCreate.push({ key: k, name: pending.productName, stars: Number(pending.stars || 0), comment: String(pending.comment || "").trim() });
         }
@@ -561,10 +564,10 @@ async function openOrderReviewsModal(orderKey, order) {
         return;
       }
 
-      // create in series (could be parallel but simple sequential to avoid write storms)
+      // create in series (secuencial)
       for (const r of toCreate) {
         try {
-          // passing orderKey for traceability
+          // createReview ahora usa set en reviewsByProduct/{productKey}/{uid}
           await createReview(r.key, r.name, r.stars, r.comment, orderKey);
         } catch (e) {
           console.error("No se pudo crear reseña para", r.key, e);
