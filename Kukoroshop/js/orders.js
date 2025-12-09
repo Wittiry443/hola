@@ -216,9 +216,8 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     // Obtener items (soportando estructura 'items' o 'cart')
     const items = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
     
-    // Generar filas de la tabla
+    // Generar filas de la tabla: se omiten los campos de precio unitario y subtotal por línea
     const itemsHtml = items.map(item => {
-        // Solo extraemos nombre y cantidad. Precio y Subtotal serán ignorados/vacíos.
         const name = item.name || item.title || item.id || 'Producto (Sin nombre)';
         const qty = item.qty || item.quantity || 1;
         
@@ -235,12 +234,12 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
         `;
     }).join('');
 
-    // Extracción de Cliente/Dirección (se asume que están al nivel de la orden o en 'shipping')
+    // Extracción de Cliente/Dirección (Ahora robusto)
     const clienteNameDisplay = order.cliente || order.userEmail || "Cliente no especificado";
     const direccionDisplay = order.shipping?.address || order.shipping?.addressLine || order.address || order.direccion || "No especificada";
     const telefonoDisplay = order.shipping?.phone || order.phone || order.telefono || "—";
     
-    // Extracción de costo de envío
+    // CORRECCIÓN CLAVE: Extracción de costo de envío
     const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
 
 
