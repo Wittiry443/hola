@@ -56,7 +56,7 @@ const adminBtn = document.getElementById("admin-panel-btn");
         <div class="invoice-footer">
           <button class="btn-invoice-action" onclick="window.print()">Imprimir / Guardar PDF</button>
         </div>
-      </div>
+        </div>
     </div>
   `;
   document.body.insertAdjacentHTML('beforeend', modalHTML);
@@ -202,9 +202,17 @@ function renderOrdersObject(obj) {
 
     // Asignar evento al botón recién creado
     const btn = document.getElementById(btnId);
+    
+    // 💡 CONSOLE.LOGS DE VERIFICACIÓN DE ASIGNACIÓN
+    console.log(`Intentando asignar evento a ID: ${btnId}. Botón encontrado: ${!!btn}`); 
+    
     if(btn) {
-        btn.addEventListener('click', () => (order, idPedido, createdTxt));
-    }
+        // 🛑 CORRECCIÓN CRÍTICA: Debes llamar a la función showInvoiceDetails
+        btn.addEventListener('click', () => showInvoiceDetails(order, idPedido, createdTxt)); 
+        console.log(`🎉 Evento asignado correctamente a: ${btnId}`); 
+    } else {
+        console.error(`❌ ERROR CRÍTICO: Botón ${btnId} no encontrado inmediatamente después de renderizar.`);
+    }
   });
 }
 
@@ -326,8 +334,9 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
         </div>
     `;
 
-  contentEl.innerHTML = html;
-    console.log(`✅ Modal de factura generado y listo para mostrar para ID: ${idDisplay}`); // <--- LÍNEA A AÑADIR
+  contentEl.innerHTML = html;
+    // 💡 CONSOLE.LOG DE EJECUCIÓN DEL MODAL
+    console.log(`✅ Modal de factura generado y listo para mostrar para ID: ${idDisplay}`); 
     modalOverlay.style.display = 'flex';
 }
 
