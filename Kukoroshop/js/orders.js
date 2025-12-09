@@ -203,7 +203,7 @@ function renderOrdersObject(obj) {
     // Asignar evento al botón recién creado
     const btn = document.getElementById(btnId);
     if(btn) {
-        btn.addEventListener('click', () => showInvoiceDetails(order, idPedido, createdTxt));
+        btn.addEventListener('click', () => (order, idPedido, createdTxt));
     }
   });
 }
@@ -326,7 +326,8 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
         </div>
     `;
 
-    contentEl.innerHTML = html;
+  contentEl.innerHTML = html;
+    console.log(`✅ Modal de factura generado y listo para mostrar para ID: ${idDisplay}`); // <--- LÍNEA A AÑADIR
     modalOverlay.style.display = 'flex';
 }
 
