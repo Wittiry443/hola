@@ -1,12 +1,28 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Kukoro-shop – Panel Admin</title>
-
   <link rel="stylesheet" href="styles.css" />
-  <script type="module" src="js/admin.js"></script>
+  <style>
+    /* Tabs UI (small, theme-aware styles that complement styles.css) */
+    .tabs { display:flex; gap:8px; align-items:center; margin:18px 0; flex-wrap:wrap }
+    .tab-btn { background:transparent; border:1px solid rgba(148,163,184,0.06); color:var(--text, #e5e7eb); padding:8px 14px; border-radius:999px; cursor:pointer; font-weight:700 }
+    .tab-btn[aria-selected="true"] { background: linear-gradient(135deg,#4f46e5,#7c3aed); box-shadow:0 8px 30px rgba(79,70,229,0.12); color:#fff }
+    .tab-panels > .tab-panel { display:none; animation:fadeIn .14s ease; }
+    .tab-panels > .tab-panel[aria-hidden="false"] { display:block }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
+
+    /* small layout tweaks so panels align like original page */
+    .admin-grid { display:grid; grid-template-columns: 1fr; gap:16px }
+    @media(min-width:1000px) { .admin-grid { grid-template-columns: 1fr 1fr } }
+
+    /* keep modals and table-wrapper as before (styles.css should already provide) */
+
+    /* optional: subtle divider below tabs */
+    .tabs-hr { height:1px; background:linear-gradient(90deg, transparent, rgba(148,163,184,0.03), transparent); margin-bottom:12px }
+  </style>
 </head>
 <body class="admin-body">
   <header>
@@ -23,151 +39,189 @@
 
   <main class="admin-main">
     <h1 class="admin-title">Panel administrativo 🛠</h1>
-    <p class="admin-subtitle">
-      Gestiona el catálogo y revisa el estado de los pedidos.
-    </p>
+    <p class="admin-subtitle">Gestiona el catálogo y revisa el estado de los pedidos.</p>
 
-    <div class="admin-grid">
-      <!-- GESTIÓN DE PRODUCTOS -->
-      <section class="admin-card">
-        <div class="admin-card-header">
-          <h2>Productos 📚</h2>
-          <button id="new-product-btn" class="btn-small btn-primary">
-            + Nuevo producto
-          </button>
-        </div>
-
-        <div class="admin-card-body">
-          <div class="admin-filters">
-            <input
-              type="text"
-              id="product-search"
-              placeholder="Buscar por nombre..."
-              class="search-bar small"
-            />
-            <select id="product-category-filter" class="select-small">
-              <option value="">Todas las categorías</option>
-            </select>
-          </div>
-
-          <div class="table-wrapper">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>ID (row)</th>
-                  <th>Categoría</th>
-                  <th>Nombre</th>
-                  <th>Precio</th>
-                  <th>Stock</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="product-table-body">
-                <!-- filas dinámicas de productos -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- DASHBOARD DE PEDIDOS -->
-      <section class="admin-card">
-        <div class="admin-card-header">
-          <h2>Pedidos 📦</h2>
-        </div>
-
-        <div class="admin-card-body">
-          <!-- Stats de pedidos / ventas -->
-          <div class="admin-stats-row">
-            <div class="stat-pill">
-              Ventas hoy: $<span id="ventasDia">0</span>
-            </div>
-            <div class="stat-pill">
-              Ventas este mes: $<span id="ventasMes">0</span>
-            </div>
-            <div class="stat-pill">
-              Pedidos: <span id="pedidosCount">0</span>
-            </div>
-          </div>
-
-          <p class="admin-hint">
-            Los pedidos se cargan automáticamente desde
-            <strong>Firebase Realtime Database</strong> (nodo
-            <code>/orders</code>) cuando un usuario realiza una compra desde la tienda.
-          </p>
-
-          <div class="table-wrapper">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>ID Pedido</th>
-                  <th>Cliente</th>
-                  <th>Resumen</th>
-                  <th>Total</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="orders-table-body">
-                <!-- filas dinámicas de pedidos -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+    <!-- TABS -->
+    <div class="tabs" role="tablist" aria-label="Panel administrativo tabs">
+      <button class="tab-btn" role="tab" aria-selected="true" data-target="tab-products" id="tab-btn-products">Productos</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-target="tab-orders" id="tab-btn-orders">Pedidos</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-target="tab-refunds" id="tab-btn-refunds">Cancelaciones / Reembolsos</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-target="tab-reviews" id="tab-btn-reviews">Reseñas</button>
     </div>
+    <div class="tabs-hr"></div>
+
+    <!-- Panels container -->
+    <div class="tab-panels">
+      <!-- PRODUCTS PANEL -->
+      <section id="tab-products" class="tab-panel" role="tabpanel" aria-hidden="false">
+        <div class="admin-grid">
+          <section class="admin-card">
+            <div class="admin-card-header">
+              <h2>Productos 📚</h2>
+              <button id="new-product-btn" class="btn-small btn-primary">+ Nuevo producto</button>
+            </div>
+
+            <div class="admin-card-body">
+              <div class="admin-filters">
+                <input type="text" id="product-search" placeholder="Buscar por nombre..." class="search-bar small" />
+                <select id="product-category-filter" class="select-small"><option value="">Todas las categorías</option></select>
+              </div>
+
+              <div class="table-wrapper">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID (row)</th>
+                      <th>Categoría</th>
+                      <th>Nombre</th>
+                      <th>Precio</th>
+                      <th>Stock</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="product-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- right column kept empty on wide screens to keep original two-column feel -->
+          <div style="min-width:260px"></div>
+        </div>
+      </section>
+
+      <!-- ORDERS PANEL -->
+      <section id="tab-orders" class="tab-panel" role="tabpanel" aria-hidden="true">
+        <div class="admin-grid">
+          <section class="admin-card">
+            <div class="admin-card-header"><h2>Pedidos 📦</h2></div>
+            <div class="admin-card-body">
+              <div class="admin-stats-row">
+                <div class="stat-pill">Ventas hoy: $<span id="ventasDia">0</span></div>
+                <div class="stat-pill">Ventas este mes: $<span id="ventasMes">0</span></div>
+                <div class="stat-pill">Pedidos: <span id="pedidosCount">0</span></div>
+              </div>
+              <p class="admin-hint">Los pedidos se cargan automáticamente desde <strong>Firebase Realtime Database</strong> (nodo <code>/orders</code>).</p>
+              <div class="table-wrapper">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID Pedido</th>
+                      <th>Cliente</th>
+                      <th>Resumen</th>
+                      <th>Total</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="orders-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- optional right column to place quick actions or details later -->
+          <aside class="admin-card" style="height:fit-content">
+            <div class="admin-card-header"><h3>Atajos</h3></div>
+            <div class="admin-card-body">
+              <p class="admin-hint">Usa los select para cambiar estado o el botón ✎ para editar un pedido.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- REFUNDS / CANCELLATIONS PANEL -->
+      <section id="tab-refunds" class="tab-panel" role="tabpanel" aria-hidden="true">
+        <div class="admin-card">
+          <div class="admin-card-header"><h2>Cancelaciones / Reembolsos</h2></div>
+          <div class="admin-card-body">
+            <p class="admin-hint">Aquí aparecerán los pedidos marcados para reembolso o cancelación. (Placeholder)</p>
+            <div class="table-wrapper">
+              <table class="admin-table">
+                <thead><tr><th>ID Pedido</th><th>Cliente</th><th>Razón</th><th>Monto</th><th>Estado</th><th>Acciones</th></tr></thead>
+                <tbody id="refunds-table-body"><tr><td colspan="6" style="text-align:center;color:#999;padding:18px">No hay solicitudes.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- REVIEWS PANEL -->
+      <section id="tab-reviews" class="tab-panel" role="tabpanel" aria-hidden="true">
+        <div class="admin-card">
+          <div class="admin-card-header"><h2>Reseñas</h2></div>
+          <div class="admin-card-body">
+            <p class="admin-hint">Lista de reseñas públicas por producto. Aquí puedes moderar (editar/eliminar) si eres admin.</p>
+            <div class="table-wrapper">
+              <table class="admin-table">
+                <thead><tr><th>Producto (key)</th><th>Usuario</th><th>Estrellas</th><th>Comentario</th><th>Fecha</th><th>Acciones</th></tr></thead>
+                <tbody id="reviews-table-body"><tr><td colspan="6" style="text-align:center;color:#999;padding:18px">Cargando reseñas…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- product modal (same as before) -->
+    <div id="product-modal-overlay" class="auth-overlay" aria-hidden="true">
+      <div class="auth-modal admin-modal">
+        <h3 id="product-modal-title">Nuevo producto</h3>
+        <form id="product-form">
+          <input type="hidden" id="product-row" />
+          <label class="auth-label">Categoría (sheetKey)<input id="product-sheetKey" type="text" required /></label>
+          <label class="auth-label">Nombre<input id="product-name" type="text" required /></label>
+          <label class="auth-label">Precio<input id="product-price" type="number" step="0.01" required /></label>
+          <label class="auth-label">Stock<input id="product-stock" type="number" min="0" required /></label>
+          <label class="auth-label">URL de imagen<input id="product-img" type="url" /></label>
+          <label class="auth-label">Descripción<textarea id="product-description" rows="3"></textarea></label>
+          <p class="auth-error" id="product-form-error"></p>
+          <button type="submit" class="btn-primary auth-submit">Guardar cambios</button>
+        </form>
+        <button id="product-modal-close" class="btn-ghost btn-small auth-close">Cancelar</button>
+      </div>
+    </div>
+
   </main>
 
-  <!-- MODAL DE PRODUCTO (crear / editar) -->
-  <div id="product-modal-overlay" class="auth-overlay" aria-hidden="true">
-    <div class="auth-modal admin-modal">
-      <h3 id="product-modal-title">Nuevo producto</h3>
+  <script>
+    // Tab switching logic (simple, accessible, remembers last tab)
+    (function(){
+      const buttons = document.querySelectorAll('.tab-btn');
+      const panels = document.querySelectorAll('.tab-panel');
+      function activate(id, push=true){
+        buttons.forEach(b=>{
+          const selected = b.dataset.target === id;
+          b.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        panels.forEach(p=>{
+          const show = p.id === id;
+          p.setAttribute('aria-hidden', show ? 'false' : 'true');
+        });
+        if (push) localStorage.setItem('admin.activeTab', id);
+      }
+      buttons.forEach(b=> b.addEventListener('click', ()=> activate(b.dataset.target)));
+      // restore last
+      const last = localStorage.getItem('admin.activeTab') || 'tab-products';
+      // if panel exists
+      if (document.getElementById(last)) activate(last, false); else activate('tab-products', false);
+      // keyboard support: left/right
+      document.addEventListener('keydown', (e)=>{
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        const arr = Array.from(buttons);
+        const idx = arr.findIndex(b=> b.getAttribute('aria-selected') === 'true');
+        if (idx < 0) return;
+        let next = idx + (e.key === 'ArrowRight' ? 1 : -1);
+        if (next < 0) next = arr.length-1;
+        if (next >= arr.length) next = 0;
+        arr[next].click();
+        arr[next].focus();
+      });
+    })();
+  </script>
 
-      <form id="product-form">
-        <input type="hidden" id="product-row" />
-
-        <label class="auth-label">
-          Categoría (sheetKey)
-          <input id="product-sheetKey" type="text" required />
-        </label>
-
-        <label class="auth-label">
-          Nombre
-          <input id="product-name" type="text" required />
-        </label>
-
-        <label class="auth-label">
-          Precio
-          <input id="product-price" type="number" step="0.01" required />
-        </label>
-
-        <label class="auth-label">
-          Stock
-          <input id="product-stock" type="number" min="0" required />
-        </label>
-
-        <label class="auth-label">
-          URL de imagen
-          <input id="product-img" type="url" />
-        </label>
-
-        <label class="auth-label">
-          Descripción
-          <textarea id="product-description" rows="3"></textarea>
-        </label>
-
-        <p class="auth-error" id="product-form-error"></p>
-
-        <button type="submit" class="btn-primary auth-submit">
-          Guardar cambios
-        </button>
-      </form>
-
-      <button id="product-modal-close" class="btn-ghost btn-small auth-close">
-        Cancelar
-      </button>
-    </div>
-  </div>
+  <!-- admin logic (keeps original admin.js) -->
+  <script type="module" src="js/admin.js"></script>
 </body>
 </html>
-
