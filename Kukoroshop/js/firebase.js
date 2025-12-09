@@ -51,6 +51,7 @@ export async function createOrderInDB(order, user = null) {
     const ordersRef = ref(db, "orders");
     const newRef = push(ordersRef);
     const now = Date.now();
+
     const payload = {
       ...order,
       createdAt: now,
@@ -66,11 +67,9 @@ export async function createOrderInDB(order, user = null) {
     }
 
     console.log("[firebase] order saved:", newRef.key);
-    return { ok: true, key: newRef.key, error: null };
+    return { ok: true, key: newRef.key };
   } catch (err) {
     console.error("[firebase] createOrderInDB ERROR:", err);
-    return { ok: false, key: null, error: String(err) };
+    return { ok: false, error: String(err) };
   }
 }
-
-
