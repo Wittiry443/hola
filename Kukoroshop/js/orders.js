@@ -260,75 +260,101 @@ function renderOrdersObject(obj) {
 
 // Mostrar modal con detalles (robusta)
 // Mostrar modal con detalles (parsea resumen si no hay items individuales)
+// Reemplaza tu showInvoiceDetails por esta versión
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
   try {
-    if (!order || typeof order !== 'object') return;
+    if (!order || typeof order !== "object") return;
 
-    const overlay = document.getElementById('invoice-overlay');
-    const contentEl = document.getElementById('invoice-content');
+    const overlay = document.getElementById("invoice-overlay");
+    const contentEl = document.getElementById("invoice-content");
     if (!overlay || !contentEl) return;
 
-    // Determinar lista de items a mostrar
-    let itemsToRender = [];
+    // Obtener array de items (soporta order.items o order.cart)
+    const rawItems = Array.isArray(order.items)
+      ? order.items
+      : (Array.isArray(order.cart) ? order.cart : []);
 
-    if (Array.isArray(order.items) && order.items.length) {
-      // items ya detallados: normalizar a { name, qty, price }
-      itemsToRender = order.items.map(it => ({
-        name: it.nombre || it.name || it.title || 'Producto',
-        qty: Number(it.cantidad ?? it.qty ?? it.quantity ?? 1),
-        price: (it.precioUnitario !== undefined ? Number(it.precioUnitario) : (it.price !== undefined ? Number(it.price) : null))
-      }));
-    } else if (order.resumen && String(order.resumen).trim()) {
-      // parsear resumen: "1 x Justice... | 2 x Otro..."
-      const parts = String(order.resumen).split(/\s*\|\s*/).map(p => p.trim()).filter(Boolean);
-      itemsToRender = parts.map(part => {
-        const m = part.match(/^(\d+)\s*x\s*(.+)$/i);
-        if (m) {
-          return { name: m[2].trim(), qty: Number(m[1]), price: null };
-        }
-        // fallback: todo el string en nombre
-        return { name: part, qty: '', price: null };
-      });
-    }
+    // Normalizar cada item a { name, qty, price }
+    const itemsToRender = rawItems.map(it => {
+      const name = it.nombre || it.name || it.title || "Producto";
+      // pueden venir como 'cantidad', 'qty' o 'quantity'
+      const qtyRaw = (it.cantidad !== undefined) ? it.cantidad : (it.qty !== undefined ? it.qty : (it.quantity !== undefined ? it.quantity : null));
+      const qty = (qtyRaw === null || qtyRaw === "" || isNaN(Number(qtyRaw))) ? null : Number(qtyRaw);
 
-    // Construir html de filas
-    let itemsHtml = '';
+      // precio puede estar en 'precioUnitario' (tu caso), o 'precioUnitario' numérico, o 'price'
+      const priceRaw = (it.precioUnitario !== undefined) ? it.precioUnitario : (it.precioUnitaria !== undefined ? it.precioUnitaria : (it.price !== undefined ? it.price : null));
+      const price = (priceRaw === null || priceRaw === "" || isNaN(Number(priceRaw))) ? null : Number(priceRaw);
+
+      return { name: String(name), qty, price, raw: it };
+    });
+
+    // Construir filas HTML
+    let itemsHtml = "";
     if (itemsToRender.length) {
       const rows = itemsToRender.map(it => {
-        const nm = escapeHtml(String(it.name || 'Producto'));
-        const qty = (it.qty === '' || it.qty === null || typeof it.qty === 'undefined') ? '—' : escapeHtml(String(it.qty));
-        const priceCell = (typeof it.price === 'number' && !isNaN(it.price)) ? fmtPrice(it.price) : '—';
-        const lineTotal = (typeof it.price === 'number' && !isNaN(it.price) && it.qty) ? fmtPrice(it.price * Number(it.qty)) : '—';
-        return `<tr>
-          <td><strong>${nm}</strong><div style="font-size:12px;color:#888">Ref: ${escapeHtml(it.id || '-')}</div></td>
-          <td style="text-align:center;">${qty}</td>
-          <td style="text-align:right;">${priceCell}</td>
-          <td style="text-align:right;">${lineTotal}</td>
-        </tr>`;
-      }).join('');
-      itemsHtml = `<table class="invoice-items-table">
-        <thead>
+        const nm = escapeHtml(it.name);
+        const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
+        const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
+        const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
+        return `
           <tr>
-            <th style="width:60%">Producto</th>
-            <th style="text-align:center;">Cant.</th>
-            <th style="text-align:right;">Precio</th>
-            <th style="text-align:right;">Total</th>
+            <td>
+              <strong>${nm}</strong>
+              <div style="font-size:12px;color:#888">Ref: ${escapeHtml(it.raw.id || it.raw.row || "-")}</div>
+            </td>
+            <td style="text-align:center;">${qtyTxt}</td>
+            <td style="text-align:right;">${priceTxt}</td>
+            <td style="text-align:right;">${lineTotalTxt}</td>
           </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+        `;
+      }).join("");
+      itemsHtml = `
+        <table class="invoice-items-table">
+          <thead>
+            <tr>
+              <th style="width:60%">Producto</th>
+              <th style="text-align:center;">Cant.</th>
+              <th style="text-align:right;">Precio</th>
+              <th style="text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } else if (order.resumen) {
+      // fallback: parsear resumen si no hay array items
+      const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
+      const rows = parts.map(p => {
+        const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
+        if (m) {
+          return `<tr><td><strong>${escapeHtml(m[2].trim())}</strong></td><td style="text-align:center;">${escapeHtml(m[1])}</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+        }
+        return `<tr><td><strong>${escapeHtml(p)}</strong></td><td style="text-align:center;">—</td><td style="text-align:right;">—</td><td style="text-align:right;">—</td></tr>`;
+      }).join("");
+      itemsHtml = `
+        <table class="invoice-items-table">
+          <thead>
+            <tr>
+              <th style="width:60%">Producto</th>
+              <th style="text-align:center;">Cant.</th>
+              <th style="text-align:right;">Precio</th>
+              <th style="text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
     } else {
       itemsHtml = `<div style="text-align:center;padding:18px;color:#777">No hay detalle de items.</div>`;
     }
 
-    // Datos cliente / totales
+    // Cliente / totales
     const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente");
-    const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || 'No especificada');
-    const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || '—');
+    const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || "No especificada");
+    const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || "—");
     const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
     const total = Number(order.total || 0);
-    // Si no hay subtotal, no intentamos calcularlo por item (no tenemos precios)
-    const subtotalTxt = (Number(order.subtotal) || (shippingCost > 0 ? (total - shippingCost) : total)) || 0;
+    const subtotal = (Number(order.subtotal) || (shippingCost > 0 ? (total - shippingCost) : total)) || 0;
 
     const html = `
       <div style="margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px;">
@@ -350,7 +376,7 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
           <div style="color:#555;font-size:14px">
             ID: <strong>${escapeHtml(String(idDisplay))}</strong><br>
             Fecha: ${escapeHtml(String(dateDisplay))}<br>
-            Estado: ${escapeHtml(order.estado || order.status || 'Pendiente')}
+            Estado: ${escapeHtml(order.estado || order.status || "Pendiente")}
           </div>
         </div>
       </div>
@@ -358,8 +384,8 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
       ${itemsHtml}
 
       <div style="border-top:2px solid #eee;padding-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotalTxt)}</span></div>
-        ${shippingCost > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Envío:</span><span>${fmtPrice(shippingCost)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotal)}</span></div>
+        ${shippingCost > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Envío:</span><span>${fmtPrice(shippingCost)}</span></div>` : ""}
         <div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px;margin-top:6px"><span>TOTAL:</span><span>${fmtPrice(total)}</span></div>
       </div>
     `;
@@ -367,17 +393,14 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     contentEl.innerHTML = html;
 
     // mostrar modal y bloquear scroll
-    if (typeof window.__showInvoiceOverlay === 'function') window.__showInvoiceOverlay();
-    else {
-      overlay.style.display = 'flex';
-      overlay.setAttribute('aria-hidden', 'false');
-      document.documentElement.style.overflow = 'hidden';
-    }
-
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden", "false");
+    document.documentElement.style.overflow = "hidden";
     overlay.scrollTop = 0;
     contentEl.scrollTop = 0;
+
   } catch (err) {
-    // si ocurre algo no logeamos en consola (según pediste), pero puedes manejar aquí un UI fallback si quieres
+    // manejar silent fail si quieres
   }
 }
 
