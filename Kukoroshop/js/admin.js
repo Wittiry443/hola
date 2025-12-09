@@ -1,7 +1,5 @@
-//-----------------------------------------------------------
-//  WyvernStore Admin Panel + DASHBOARD de pedidos (Firebase)
-//-----------------------------------------------------------
-
+// js/admin.js (versión mejorada)
+// importaciones
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
@@ -10,43 +8,64 @@ import {
   ref,
   onValue,
   update,
-  remove
+  remove,
+  get
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+import { getIdTokenResult } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
 // Estados disponibles para el select
-const ORDER_STATUSES = [
-  "pendiente",
-  "en proceso",
-  "enviado",
-  "entregado",
-  "cancelado"
-];
+const ORDER_STATUSES = ["pendiente","en proceso","enviado","entregado","cancelado"];
 
-//-----------------------------------------------------------
 // Estado interno
-//-----------------------------------------------------------
 let allProducts = [];
 let filteredProducts = [];
 
-//-----------------------------------------------------------
+// --- Helper: comprobar admin (claims -> /admins -> ADMIN_EMAILS)
+async function isAdminUser(user) {
+  if (!user) return false;
+
+  // 1) revisar custom claims
+  try {
+    const token = await getIdTokenResult(user);
+    if (token?.claims?.admin === true) return true;
+  } catch (e) {
+    console.warn("No se pudo leer claims:", e);
+  }
+
+  // 2) revisar /admins/{uid} en la Realtime DB (si lo usas)
+  try {
+    const snap = await get(ref(db, `admins/${user.uid}`));
+    if (snap.exists() && snap.val() === true) return true;
+  } catch (e) {
+    console.warn("No se pudo leer /admins node:", e);
+  }
+
+  // 3) fallback UX: lista local (no segura para reglas, solo UI)
+  if (ADMIN_EMAILS && ADMIN_EMAILS.includes(user.email)) return true;
+
+  return false;
+}
+
 // Seguridad: acceso solo para admins
-//-----------------------------------------------------------
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   const label = document.getElementById("admin-user-label");
 
   if (!user) return (window.location.href = "index.html");
-  if (!ADMIN_EMAILS.includes(user.email)) {
+
+  // comprobar admin
+  const isAdmin = await isAdminUser(user);
+  if (!isAdmin) {
+    // si no es admin, avisar y redirigir
     alert("No tienes permisos de administrador.");
     return (window.location.href = "index.html");
   }
 
-  label.textContent = user.email;
+  // ok: mostrar email y arrancar UI
+  if (label) label.textContent = user.email || "";
   initAdminUI();
 });
 
-//-----------------------------------------------------------
 // UI Inicial
-//-----------------------------------------------------------
 function initAdminUI() {
   document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
   document.getElementById("admin-back-btn").onclick = () => (window.location.href = "index.html");
@@ -64,9 +83,7 @@ function initAdminUI() {
   generarDashboardPedidos(); // lee /orders y arma la tabla de pedidos
 }
 
-//-----------------------------------------------------------
-// 📦 DASHBOARD DE PEDIDOS (Firebase Realtime Database)
-//-----------------------------------------------------------
+// DASHBOARD DE PEDIDOS (Firebase Realtime Database)
 function generarDashboardPedidos() {
   const tbody = document.getElementById("orders-table-body");
   if (!tbody) return;
@@ -75,13 +92,7 @@ function generarDashboardPedidos() {
   const ventasMesEl = document.getElementById("ventasMes");
   const pedidosEl   = document.getElementById("pedidosCount");
 
-  tbody.innerHTML = `
-    <tr>
-      <td colspan="6" style="text-align:center;color:#999">
-        Cargando pedidos desde Firebase...
-      </td>
-    </tr>
-  `;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">Cargando pedidos desde Firebase...</td></tr>`;
 
   const today  = new Date();
   const year   = today.getFullYear();
@@ -101,13 +112,7 @@ function generarDashboardPedidos() {
     tbody.innerHTML = "";
 
     if (!entries.length) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="6" style="text-align:center;color:#aaa">
-            No hay pedidos registrados todavía.
-          </td>
-        </tr>
-      `;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#aaa">No hay pedidos registrados todavía.</td></tr>`;
     } else {
       entries.forEach(([key, order]) => {
         totalPedidos++;
@@ -116,21 +121,16 @@ function generarDashboardPedidos() {
 
         // Fecha
         let created = null;
-        try {
-          if (order.createdAt) created = new Date(order.createdAt);
-        } catch (e) {
-          created = null;
-        }
+        try { if (order.createdAt) created = new Date(order.createdAt); } catch (e) { created = null; }
 
         const estado   = (order.estado || "pendiente").toString();
         const estadoLower = estado.toLowerCase();
 
-        // Solo contamos en las ventas si no está cancelado
+        // Contar ventas
         if (created && !isNaN(created.getTime())) {
           const y = created.getFullYear();
           const m = created.getMonth();
           const d = created.getDate();
-
           if (estadoLower !== "cancelado") {
             if (y === year && m === month) {
               totalMes += total;
@@ -138,17 +138,14 @@ function generarDashboardPedidos() {
             }
           }
         } else {
-          if (estadoLower !== "cancelado") {
-            totalMes += total;
-          }
+          if (estadoLower !== "cancelado") totalMes += total;
         }
 
         const idPedido = order.idPedido || key;
-        const cliente  = order.cliente || "Sin cliente";
+        const cliente  = order.cliente || order.userEmail || "Sin cliente";
         const resumen  = order.resumen || "Sin resumen";
         const estadoClass = estadoLower.replace(/\s+/g, "-");
 
-        // Opciones de estado para el select
         const optionsHtml = ORDER_STATUSES.map(st => `
           <option value="${st}" ${st === estadoLower ? "selected" : ""}>
             ${st}
@@ -161,28 +158,17 @@ function generarDashboardPedidos() {
     <td>${escapeHtml(String(cliente))}</td>
     <td>${escapeHtml(String(resumen))}</td>
     <td>$${Number(total || 0).toLocaleString()}</td>
-    <td>
-      <span class="estado ${estadoClass}">
-        ${escapeHtml(estado)}
-      </span>
-    </td>
+    <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
     <td>
       <div class="order-actions">
         <select class="order-status-select" data-order-key="${key}">
           ${optionsHtml}
         </select>
-        <button
-          class="order-delete-btn"
-          data-order-key="${key}"
-          title="Eliminar pedido"
-        >
-          🗑
-        </button>
+        <button class="order-delete-btn" data-order-key="${key}" title="Eliminar pedido">🗑</button>
       </div>
     </td>
   </tr>
 `;
-
       });
     }
 
@@ -190,42 +176,48 @@ function generarDashboardPedidos() {
     if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
     if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
 
-    // Listeners para los selects de estado
+    // Listeners para selects de estado
     tbody.querySelectorAll(".order-status-select").forEach(sel => {
       sel.onchange = async () => {
         const key = sel.dataset.orderKey;
         const newStatus = sel.value;
-        try {
-          await updateOrderStatus(key, newStatus);
-        } catch (e) {
-          console.error("Error actualizando estado:", e);
-          alert("No se pudo actualizar el estado. Revisa la consola.");
-        }
+        try { await updateOrderStatus(key, newStatus); }
+        catch (e) { console.error("Error actualizando estado:", e); alert("No se pudo actualizar el estado. Revisa la consola."); }
       };
     });
 
-    // Listeners para los botones de eliminar
+    // Listeners para eliminar
     tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
         if (!confirm("¿Eliminar este pedido de forma permanente?")) return;
-        try {
-          await deleteOrder(key);
-        } catch (e) {
-          console.error("Error eliminando pedido:", e);
-          alert("No se pudo eliminar el pedido. Revisa la consola.");
-        }
+        try { await deleteOrder(key); }
+        catch (e) { console.error("Error eliminando pedido:", e); alert("No se pudo eliminar el pedido. Revisa la consola."); }
       };
     });
   }, (error) => {
     console.error("Error leyendo orders:", error);
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" style="text-align:center;color:#f55">
-          Error cargando pedidos desde Firebase.
-        </td>
-      </tr>
-    `;
+
+    // Si es permission_denied, mostrar mensaje claro con uid para debug
+    if (error && error.code && error.code === "permission_denied") {
+      const currentUser = auth.currentUser;
+      const uid = currentUser ? currentUser.uid : "no-uid";
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align:center;color:#f55">
+            Error: permission_denied al leer /orders. UID actual: ${escapeHtml(String(uid))}. Revisa las reglas de Realtime DB o asigna admin claim/admins node.
+          </td>
+        </tr>
+      `;
+    } else {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align:center;color:#f55">
+            Error cargando pedidos desde Firebase.
+          </td>
+        </tr>
+      `;
+    }
   });
 }
 
@@ -418,3 +410,4 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
