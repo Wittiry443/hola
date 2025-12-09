@@ -393,17 +393,11 @@ export async function createOrderFromItems(items) {
 
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
-  try {
-    // createOrderInDB devuelve la key (string) en tu firebase.js
-    const key = await createOrderInDB(order);
-    if (!key) {
-      console.error("[orders] createOrderInDB returned falsy key:", key);
-      return { ok: false, firebaseKey: null, error: "no_key_returned", order };
-    }
-    console.log("[orders] order saved ok, firebaseKey:", key);
+try {
+    const key = await createOrderInDB(order, user); // <-- pasamos user
+    if (!key) return { ok: false, firebaseKey: null, error: "no_key_returned", order };
     return { ok: true, firebaseKey: key, error: null, order };
   } catch (err) {
-    console.error("[orders] createOrderFromItems EXCEPTION:", err);
     return { ok: false, firebaseKey: null, error: String(err), order };
   }
 }
@@ -868,5 +862,6 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
+
 
 
