@@ -73,3 +73,27 @@ export async function createOrderInDB(order, user = null) {
     return { ok: false, error: String(err) };
   }
 }
+
+export async function ensureUserRecord(user) {
+  if (!user || !user.uid) return;
+  try {
+    // lee si existe admin mark para este uid (no es obligatorio)
+    // si no quieres leer aquí, puedes omitir este bloque y dejar role:'client'
+    const adminSnap = await get(ref(db, `admins/${user.uid}`));
+    const isAdmin = adminSnap.exists() && adminSnap.val() === true;
+
+    const payload = {
+      email: user.email || null,
+      displayName: user.displayName || null,
+      lastLogin: Date.now(),
+      role: isAdmin ? "admin" : "client"
+    };
+
+    await set(ref(db, `users/${user.uid}`), payload);
+    console.log("[firebase] ensureUserRecord ok for", user.uid);
+    return { ok: true };
+  } catch (err) {
+    console.error("[firebase] ensureUserRecord ERROR:", err);
+    return { ok: false, error: String(err) };
+  }
+}
