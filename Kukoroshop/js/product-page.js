@@ -13,7 +13,7 @@ import { ref, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-dat
 
 const container = document.getElementById("product-page-root") || document.body;
 
-// estilos (igual que antes)
+// estilos (si tu css ya cubre todo, puedes eliminar esto)
 (function injectStyles() {
   if (document.getElementById("product-page-styles")) return;
   const s = document.createElement("style");
@@ -53,23 +53,18 @@ function parsePK(pk) {
 
 async function fetchProductFromAPI(sheetKey, row) {
   try {
-    const url = `${API_URL}?sheetKey=${encodeURIComponent(sheetKey)}&_=${Date.now()}`;
-    console.debug("[product-api] fetch URL:", url);
-    const r = await fetch(url, { cache: "no-store" });
+    const r = await fetch(`${API_URL}?sheetKey=${encodeURIComponent(sheetKey)}&_=${Date.now()}`, { cache: "no-store" });
     const data = await r.json();
     const products = data.products || [];
-    console.debug(`[product-api] response products count: ${products.length}`);
     const found = products.find(p => String(p.row) === String(row));
     if (found) {
       if (!found.sheetKey) found.sheetKey = sheetKey;
       found.data = found.data || {};
-      console.debug("[product-api] product found in API:", { row: found.row, sheetKey: found.sheetKey });
       return found;
     }
-    console.debug("[product-api] product NOT found in API for row:", row);
     return null;
   } catch (e) {
-    console.error("fetchProductFromAPI error:", e);
+    console.error("fetchProductFromAPI error", e);
     return null;
   }
 }
@@ -82,6 +77,7 @@ function normalizeProductEntry(p, sheetKey) {
   const imgUrl = firstKeyValue(d, ["img","Img","imagen","image","url","Imagen"]) || d.Img || "";
   const description = firstKeyValue(d, ["descripcion","Descripcion","description","desc","nota","Nota"]) || d.descripcion || d.Descripcion || "";
   const sheet = (sheetKey || (p.sheetKey || d.Categoria || d.categoria || "UNKNOWN"));
+  // productKey en el mismo formato que usas en tarjetas: sheet::row (sheet en minúsculas)
   const productKey = `${String(sheet).trim().toLowerCase()}::${String(p.row)}`;
   return { row: p.row, sheetKey: sheet, data: d, name, price, stock, imgUrl, description, productKey };
 }
@@ -93,68 +89,59 @@ function slugify(str) {
     .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // quitar diacríticos
     .replace(/[^\w\s-]/g, "") // quitar caracteres extraños
     .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/\s+/g, "-");
 }
 
-// Lee reseñas: intenta reviewsByProduct/{productKey} y luego reviewsBySlug/{slug}
+// Lee reseñas: intenta reviewsByProduct/{productKey}, luego reviewsByProduct/{slug}, luego reviewsBySlug/{slug}
 async function loadReviews(productKey, productName) {
   console.groupCollapsed("[reviews] loadReviews start");
   console.debug("Inputs:", { productKey, productName });
 
+  function pathReviewsByProduct(p) { return `reviewsByProduct/${p}`; }
   try {
-    // 1) intentamos por productKey (tal cual)
-    if (productKey) {
-      const path1 = `reviewsByProduct/${productKey}`;
-      console.debug("[reviews] querying path:", path1);
-      const snap1 = await get(ref(db, path1));
-      console.debug("[reviews] snap1.exists():", !!snap1.exists());
-      if (snap1.exists()) {
-        const val = snap1.val();
-        console.debug("[reviews] snap1.val() keys:", Object.keys(val || {}).slice(0,20));
+    const tried = [];
+
+    if (productKey) tried.push(pathReviewsByProduct(productKey));
+
+    // si productKey tiene formato sheet::row, también probar slug (parte antes de ::)
+    if (productKey && productKey.includes("::")) {
+      const before = productKey.split("::")[0];
+      if (before && before !== productKey) tried.push(pathReviewsByProduct(before));
+    }
+
+    // slug desde nombre
+    const slugFromName = slugify(productName || "");
+    if (slugFromName) {
+      // intentar reviewsByProduct/<slug> y reviewsBySlug/<slug>
+      tried.push(pathReviewsByProduct(slugFromName));
+      tried.push(`reviewsBySlug/${slugFromName}`);
+    }
+
+    // limpiar duplicados y falsos
+    const uniq = [...new Set(tried.filter(Boolean))];
+    console.debug("[reviews] candidate paths:", uniq);
+
+    for (const p of uniq) {
+      console.debug(`[reviews] querying path: ${p}`);
+      const snap = await get(ref(db, p));
+      console.debug(`[reviews] path ${p} exists?`, !!(snap && snap.exists && snap.exists()));
+      if (snap && snap.exists && snap.exists()) {
+        const val = snap.val() || {};
+        console.debug(`[reviews] fetched keys (${Object.keys(val).length}):`, Object.keys(val).slice(0, 20));
         const arr = Object.keys(val).map(k => ({ id: k, ...val[k] }));
         arr.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
         arr.sort((a,b) => b.createdAt - a.createdAt);
-        console.debug(`[reviews] returning ${arr.length} reviews from reviewsByProduct/${productKey}`);
+        console.debug(`[reviews] returning ${arr.length} reviews from ${p}`);
         console.groupEnd();
         return arr;
-      } else {
-        console.debug(`[reviews] no data at reviewsByProduct/${productKey}`);
       }
-    } else {
-      console.debug("[reviews] productKey empty or falsy, skipping reviewsByProduct");
     }
 
-    // 2) fallback: intentar por slug derivado del nombre (reviewsBySlug)
-    const slug = slugify(productName || productKey || "");
-    console.debug("[reviews] computed slug:", slug);
-    if (slug) {
-      const path2 = `reviewsBySlug/${slug}`;
-      console.debug("[reviews] querying fallback path:", path2);
-      const snap2 = await get(ref(db, path2));
-      console.debug("[reviews] snap2.exists():", !!snap2.exists());
-      if (snap2.exists()) {
-        const val2 = snap2.val();
-        console.debug("[reviews] snap2.val() keys:", Object.keys(val2 || {}).slice(0,20));
-        const arr2 = Object.keys(val2).map(k => ({ id: k, ...val2[k] }));
-        arr2.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
-        arr2.sort((a,b) => b.createdAt - a.createdAt);
-        console.debug(`[reviews] returning ${arr2.length} reviews from reviewsBySlug/${slug}`);
-        console.groupEnd();
-        return arr2;
-      } else {
-        console.debug(`[reviews] no data at reviewsBySlug/${slug}`);
-      }
-    } else {
-      console.debug("[reviews] slug empty, skipping reviewsBySlug");
-    }
-
-    console.debug("[reviews] no reviews found for productKey or slug");
+    console.debug("[reviews] no reviews found for any path");
     console.groupEnd();
     return [];
-  } catch (error) {
-    console.error("[reviews] error leyendo reseñas:", error);
+  } catch (err) {
+    console.error("[reviews] error reading reviews:", err);
     console.groupEnd();
     return [];
   }
@@ -168,14 +155,12 @@ function renderStars(n) {
 
 // montaje DOM principal
 export async function mountProductPage() {
-  console.groupCollapsed("[product-page] mount start");
   try {
     const params = new URLSearchParams(location.search);
     const pk = params.get("pk");
-    console.debug("[product-page] URL param pk:", pk);
+    console.debug("[product-page] mounting, pk:", pk);
     if (!pk) {
       container.innerHTML = `<div style="padding:28px;text-align:center;color:#f88">Producto no especificado (pk faltante en URL).</div>`;
-      console.groupEnd();
       return;
     }
 
@@ -227,13 +212,10 @@ export async function mountProductPage() {
     const reviewsList = document.getElementById("pp-reviews-list");
     reviewsList.innerHTML = `<div class="no-reviews">Cargando reseñas...</div>`;
 
-    // log para depuración
-    console.debug("[product-page] requesting reviews for:", product.productKey, product.name);
-
+    console.debug("[product-page] requesting reviews for", product.productKey);
     const reviews = await loadReviews(product.productKey, product.name);
 
-    console.debug("[product-page] reviews length:", reviews.length);
-
+    console.debug("[product-page] reviews result length:", reviews.length);
     if (!reviews || !reviews.length) {
       reviewsList.innerHTML = `<div class="no-reviews">Aún no hay reseñas para este producto.</div>`;
     } else {
@@ -253,49 +235,31 @@ export async function mountProductPage() {
         reviewsList.appendChild(entry);
       });
     }
-
-    console.groupEnd(); // product-page mount end
   } catch (err) {
     console.error("mountProductPage error", err);
     container.innerHTML = `<div style="padding:28px;text-align:center;color:#f88">Error cargando producto: ${escapeHtml(String(err && err.message || err))}</div>`;
-    console.groupEnd();
   }
 }
 
 // helpers que ya existían
 async function resolveProduct(pk) {
-  console.groupCollapsed("[resolveProduct] start for pk:", pk);
   const parsed = parsePK(pk);
-  if (!parsed) {
-    console.error("[resolveProduct] product key inválido:", pk);
-    console.groupEnd();
-    throw new Error("product key inválido");
-  }
+  if (!parsed) throw new Error("product key inválido");
   const { sheetKey, row } = parsed;
-  console.debug("[resolveProduct] parsed:", { sheetKey, row });
 
   // intentar cache local
   const cache = lastProductsCache || [];
   let p = cache.find(x => String(x.sheetKey) === String(sheetKey) && String(x.row) === String(row));
-  if (p) {
-    console.debug("[resolveProduct] found in local cache:", p);
-    console.groupEnd();
-    return normalizeProductEntry(p, sheetKey);
-  }
+  if (p) return normalizeProductEntry(p, sheetKey);
 
   // si no está en cache, pedir al API
-  console.debug("[resolveProduct] not in cache, fetching from API...");
   const remote = await fetchProductFromAPI(sheetKey, row);
   if (remote) {
     const normalized = { row: remote.row, sheetKey: remote.sheetKey || sheetKey, data: remote.data || {} };
     setLastProductsCache([...(lastProductsCache || []), normalized]);
-    console.debug("[resolveProduct] fetched and cached remote product:", normalized);
-    console.groupEnd();
     return normalizeProductEntry(remote, sheetKey);
   }
 
-  console.error("[resolveProduct] Producto no encontrado ni en cache ni en API:", { sheetKey, row });
-  console.groupEnd();
   throw new Error("Producto no encontrado");
 }
 
