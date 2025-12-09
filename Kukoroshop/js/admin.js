@@ -23,44 +23,39 @@ let filteredProducts = [];
 // --- Helper: comprobar admin (claims -> /admins -> ADMIN_EMAILS)
 async function isAdminUser(user) {
   if (!user) return false;
-
-  // 1) revisar custom claims
   try {
-    const token = await getIdTokenResult(user);
-    if (token?.claims?.admin === true) return true;
-  } catch (e) {
-    console.warn("No se pudo leer claims:", e);
-  }
-
-  // 2) revisar /admins/{uid} en la Realtime DB (si lo usas)
-  try {
+    // 1) revisar /admins/{uid}
     const snap = await get(ref(db, `admins/${user.uid}`));
     if (snap.exists() && snap.val() === true) return true;
+
+    // 2) fallback: revisar users/{uid}.role == 'admin' (útil si migraste)
+    const uSnap = await get(ref(db, `users/${user.uid}/role`));
+    if (uSnap.exists() && String(uSnap.val()) === "admin") return true;
   } catch (e) {
-    console.warn("No se pudo leer /admins node:", e);
+    console.warn("isAdminUser error:", e);
   }
 
-  // 3) fallback UX: lista local (no segura para reglas, solo UI)
+  // 3) fallback UI-only: ADMIN_EMAILS (solo para mostrar UI, no para reglas)
   if (ADMIN_EMAILS && ADMIN_EMAILS.includes(user.email)) return true;
 
   return false;
 }
 
-// Seguridad: acceso solo para admins
+// onAuthStateChanged: comprobar y guardar user record (usa ensureUserRecord)
 onAuthStateChanged(auth, async (user) => {
   const label = document.getElementById("admin-user-label");
-
   if (!user) return (window.location.href = "index.html");
 
-  // comprobar admin
+  // Guardar/actualizar registro base del usuario (client)
+  try { await ensureUserRecord(user); } catch(e){ console.warn("ensureUserRecord fail", e); }
+
+  // comprobar admin real
   const isAdmin = await isAdminUser(user);
   if (!isAdmin) {
-    // si no es admin, avisar y redirigir
     alert("No tienes permisos de administrador.");
     return (window.location.href = "index.html");
   }
 
-  // ok: mostrar email y arrancar UI
   if (label) label.textContent = user.email || "";
   initAdminUI();
 });
@@ -410,4 +405,5 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
