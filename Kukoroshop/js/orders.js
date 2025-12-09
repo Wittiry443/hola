@@ -291,23 +291,29 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     // Construir filas HTML
     let itemsHtml = "";
     if (itemsToRender.length) {
-      const rows = itemsToRender.map(it => {
-        const nm = escapeHtml(it.name);
-        const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
-        const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
-        const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
-        return `
-          <tr>
-            <td>
-              <strong>${nm}</strong>
-              <div style="font-size:12px;color:#888">Ref: ${escapeHtml(it.raw.id || it.raw.row || "-")}</div>
-            </td>
-            <td style="text-align:center;">${qtyTxt}</td>
-            <td style="text-align:right;">${priceTxt}</td>
-            <td style="text-align:right;">${lineTotalTxt}</td>
-          </tr>
-        `;
-      }).join("");
+      // dentro de showInvoiceDetails, cuando creas las filas:
+const rows = itemsToRender.map(it => {
+  const nm = escapeHtml(it.name);
+  const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
+  const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
+  const lineTotalTxt = (typeof it.price === "number" && it.qty !== null) ? fmtPrice(it.price * it.qty) : "—";
+
+  const refTxt = (it.raw && (it.raw.id || it.raw.row || it.raw.sku || it.raw.ref))
+    ? escapeHtml(it.raw.id || it.raw.row || it.raw.sku || it.raw.ref)
+    : null;
+
+  return `
+    <tr>
+      <td>
+        <strong>${nm}</strong>
+        ${refTxt ? `<div style="font-size:12px;color:#888">Ref: ${refTxt}</div>` : ""}
+      </td>
+      <td style="text-align:center;">${qtyTxt}</td>
+      <td style="text-align:right;">${priceTxt}</td>
+      <td style="text-align:right;">${lineTotalTxt}</td>
+    </tr>
+  `;
+}).join("");
       itemsHtml = `
         <table class="invoice-items-table">
           <thead>
