@@ -218,10 +218,15 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     
     // Generar filas de la tabla
     const itemsHtml = items.map(item => {
-        const name = item.name || item.title || item.id || 'Producto';
+        // --- CORRECCIÓN CLAVE: Resolución más robusta del precio ---
+        // Busca el precio en item.price, item.details.price, o item.product.price
+        const rawPrice = item.price || item.details?.price || item.product?.price || 0; 
+        
+        const name = item.name || item.title || item.id || 'Producto (Faltan datos)';
         const qty = item.qty || item.quantity || 1;
-        const price = item.price || 0;
+        const price = Number(rawPrice); // Asegura que es un número
         const sub = price * qty;
+        
         return `
             <tr>
                 <td>
@@ -235,11 +240,11 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
         `;
     }).join('');
 
-    // Datos del cliente
-    const clienteNombre = order.cliente || order.userEmail || "No especificado";
-    const clienteEmail = order.userEmail || "No especificado";
-    const direccion = order.address || order.direccion || "No especificada";
-    const telefono = order.phone || order.telefono || "";
+    // --- CORRECCIÓN CLAVE: Resolución y Display de Datos del Cliente ---
+    const clienteNameDisplay = order.cliente || "Cliente no especificado";
+    const clienteEmailDisplay = order.userEmail || "—";
+    const direccionDisplay = order.address || order.direccion || "No especificada";
+    const telefonoDisplay = order.phone || order.telefono || "—";
 
     const html = `
         <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:10px;">
@@ -251,10 +256,10 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
             <div style="flex:1; min-width:200px;">
                 <strong style="color:#333; display:block; margin-bottom:4px;">Facturar a:</strong>
                 <div style="color:#555; font-size:14px;">
-                    ${escapeHtml(clienteNombre)}<br>
-                    ${escapeHtml(clienteEmail)}<br>
-                    ${escapeHtml(direccion)}<br>
-                    ${telefono ? escapeHtml(telefono) : ''}
+                    Nombre: ${escapeHtml(clienteNameDisplay)}<br>
+                    Email: ${escapeHtml(clienteEmailDisplay)}<br>
+                    Dirección: ${escapeHtml(direccionDisplay)}<br>
+                    Teléfono: ${escapeHtml(telefonoDisplay)}
                 </div>
             </div>
             <div style="flex:1; min-width:200px; text-align:right;">
