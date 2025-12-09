@@ -6,7 +6,7 @@ import {
   onValue,
   get,
   push,
-  set
+  update
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 // UI elements
@@ -76,30 +76,23 @@ let currentOrdersMap = {};
 }
 .invoice-small { font-size:12px; color:#9ca3af; }
 
-/* Modal reseñas */
+/* Review modal styles */
 .review-modal-overlay {
-  position: fixed; inset:0; z-index:100000; display:none; align-items:center; justify-content:center;
-  background: linear-gradient(180deg, rgba(2,6,23,0.7), rgba(2,6,23,0.7));
-  padding:18px;
+  position: fixed; inset: 0; z-index: 100000; display: none; align-items:center; justify-content:center;
+  background: rgba(0,0,0,0.6);
 }
 .review-modal {
-  width:100%; max-width:760px; max-height:90vh; overflow:auto; border-radius:12px;
-  background: #020617; border:1px solid rgba(148,163,184,0.06); color:#e5e7eb; padding:16px;
+  width: 100%; max-width: 560px; border-radius: 12px; padding: 14px; background: #020617; color:#e5e7eb;
+  border: 1px solid rgba(148,163,184,0.06); box-shadow: 0 20px 60px rgba(2,6,23,0.8);
 }
-.review-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-.review-title { font-size:18px; font-weight:700; color:#e5e7eb; }
-.review-list { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
-.review-item { padding:12px; border-radius:10px; background: rgba(255,255,255,0.02); border:1px solid rgba(148,163,184,0.02); }
-.product-name { font-weight:700; color:#e5e7eb; margin-bottom:8px; }
-.stars { display:inline-flex; gap:6px; align-items:center; }
-.star { font-size:20px; color: rgba(255,255,255,0.25); cursor:pointer; user-select:none; }
-.star.active { color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
-.review-comment { width:100%; margin-top:8px; padding:8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid rgba(31,41,55,0.9); display:none; }
+.review-stars { display:flex; gap:6px; align-items:center; justify-content:flex-start; margin:12px 0; }
+.review-stars .star { font-size:28px; cursor:pointer; opacity:0.35; color:#fff; user-select:none; }
+.review-stars .star.filled { opacity:1; color:#fff; text-shadow:0 2px 8px rgba(125,90,255,0.25); }
+.review-comment { width:100%; padding:8px; border-radius:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; min-height:80px; }
 .review-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
-.review-save { background: linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; font-weight:700; }
-.review-cancel { background:transparent; border:1px solid rgba(148,163,184,0.06); color:#e5e7eb; padding:8px 12px; border-radius:8px; cursor:pointer; }
+.review-note { font-size:12px; color:#9ca3af; margin-top:8px; }
 @media (max-width:640px) {
-  .invoice-modal, .review-modal { max-width:95%; }
+  .review-modal { max-width: 95%; }
 }
   `;
   document.head.appendChild(style);
@@ -118,212 +111,57 @@ let currentOrdersMap = {};
       </div>
     </div>
 
-    <div id="review-overlay" class="review-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="review-modal" role="document" aria-labelledby="review-title">
-        <div class="review-header">
-          <div class="review-title" id="review-title">Dejar reseña</div>
-          <div><button id="review-close-btn" class="btn-close-invoice" aria-label="Cerrar reseñas">&times;</button></div>
-        </div>
-        <div id="review-body" class="review-list" tabindex="0"></div>
-        <div class="review-actions" style="margin-top:12px">
-          <button id="review-cancel-btn" class="review-cancel">Cancelar</button>
-          <button id="review-save-btn" class="review-save">Guardar reseñas</button>
-        </div>
+    <div id="review-overlay" class="review-modal-overlay" aria-hidden="true">
+      <div class="review-modal" role="dialog" aria-modal="true" id="review-modal" aria-labelledby="review-title">
+        <h3 id="review-title" style="margin:0 0 4px 0">Dejar reseña</h3>
+        <div id="review-body" style="margin-top:8px"></div>
       </div>
     </div>
   `;
   document.body.insertAdjacentHTML("beforeend", modalHTML);
 
-  const invoiceOverlay = document.getElementById("invoice-overlay");
+  const overlay = document.getElementById("invoice-overlay");
   const closeBtn = document.getElementById("close-invoice-btn");
   const printBtn = document.getElementById("print-invoice-btn");
+  const reviewOverlay = document.getElementById("review-overlay");
 
   function closeInvoice() {
-    if (!invoiceOverlay) return;
-    invoiceOverlay.style.display = "none";
-    invoiceOverlay.setAttribute("aria-hidden", "true");
+    if (!overlay) return;
+    overlay.style.display = "none";
+    overlay.setAttribute("aria-hidden", "true");
     document.documentElement.style.overflow = "";
-    window.removeEventListener("keydown", invoiceKeyHandler);
+    window.removeEventListener("keydown", onKeyDownInvoice);
   }
-  function invoiceKeyHandler(e) { if (e.key === "Escape") closeInvoice(); }
+  function onKeyDownInvoice(e) { if (e.key === "Escape") closeInvoice(); }
+
   if (closeBtn) closeBtn.addEventListener("click", closeInvoice);
-  if (invoiceOverlay) invoiceOverlay.addEventListener("click", (e) => { if (e.target === invoiceOverlay) closeInvoice(); });
+  if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) closeInvoice(); });
   if (printBtn) printBtn.addEventListener("click", () => window.print());
 
+  // review overlay handlers
+  (function setupReviewOverlayHandlers() {
+    if (!reviewOverlay) return;
+    reviewOverlay.addEventListener("click", (e) => {
+      if (e.target === reviewOverlay) hideReviewModal();
+    });
+  })();
+
+  // helpers para abrir/cerrar desde showInvoiceDetails
   window.__showInvoiceOverlay = function() {
-    if (!invoiceOverlay) return;
-    invoiceOverlay.style.display = "flex";
-    invoiceOverlay.setAttribute("aria-hidden", "false");
+    if (!overlay) return;
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden", "false");
     document.documentElement.style.overflow = "hidden";
-    window.addEventListener("keydown", invoiceKeyHandler);
-    const content = document.getElementById("invoice-content"); if (content) content.focus();
+    window.addEventListener("keydown", onKeyDownInvoice);
+    const content = document.getElementById("invoice-content");
+    if (content) content.focus();
   };
   window.__hideInvoiceOverlay = closeInvoice;
-
-  // Reviews modal handlers
-  const reviewOverlay = document.getElementById("review-overlay");
-  const reviewBody = document.getElementById("review-body");
-  const reviewClose = document.getElementById("review-close-btn");
-  const reviewCancel = document.getElementById("review-cancel-btn");
-  const reviewSave = document.getElementById("review-save-btn");
-
-  function closeReviewModal() {
-    if (!reviewOverlay) return;
-    reviewOverlay.style.display = "none";
-    reviewOverlay.setAttribute("aria-hidden", "true");
-    document.documentElement.style.overflow = "";
-    reviewBody.innerHTML = "";
-    window.removeEventListener("keydown", reviewKeyHandler);
-  }
-  function reviewKeyHandler(e) { if (e.key === "Escape") closeReviewModal(); }
-
-  if (reviewClose) reviewClose.addEventListener("click", closeReviewModal);
-  if (reviewCancel) reviewCancel.addEventListener("click", closeReviewModal);
-  if (reviewOverlay) reviewOverlay.addEventListener("click", (e) => { if (e.target === reviewOverlay) closeReviewModal(); });
-
-  // Save handler (collected reviews)
-  if (reviewSave) {
-    reviewSave.addEventListener("click", async () => {
-      try {
-        reviewSave.disabled = true;
-        const items = Array.from(reviewBody.querySelectorAll(".review-item"));
-        const reviewsToSave = items.map(node => {
-          const productName = node.dataset.productName;
-          const productKey = node.dataset.productKey || null;
-          const stars = Number(node.dataset.selectedStars || 0);
-          const commentEl = node.querySelector(".review-comment");
-          const comment = commentEl ? commentEl.value.trim() : "";
-          return { productName, productKey, stars, comment };
-        }).filter(r => r.stars > 0 || (r.comment && r.comment.length > 0));
-
-        if (!reviewsToSave.length) {
-          alert("No has dejado ninguna reseña. Selecciona al menos 1 estrella o escribe un comentario.");
-          reviewSave.disabled = false;
-          return;
-        }
-
-        // obtener usuario
-        const user = auth.currentUser || null;
-        const userMeta = { uid: user?.uid || null, email: user?.email || null };
-        const now = Date.now();
-        const orderKey = reviewBody.dataset.orderKey || null;
-
-        // guardar cada reseña en DB: preferir reviewsByProduct/{productKey} si existe, sino reviewsBySlug/{slug}
-        const results = [];
-        for (const r of reviewsToSave) {
-          const slug = slugify(r.productName);
-          const payload = {
-            productKey: r.productKey || null,
-            productSlug: slug,
-            productName: r.productName,
-            stars: Number(r.stars || 0),
-            comment: r.comment || "",
-            user: userMeta,
-            orderKey: orderKey,
-            createdAt: now
-          };
-
-          if (r.productKey) {
-            const path = `reviewsByProduct/${r.productKey}`;
-            const nodeRef = await push(ref(db, path));
-            await set(nodeRef, payload);
-            results.push({ ok: true, path, key: nodeRef.key });
-          } else {
-            const path = `reviewsBySlug/${slug}`;
-            const nodeRef = await push(ref(db, path));
-            await set(nodeRef, payload);
-            results.push({ ok: true, path, key: nodeRef.key });
-          }
-        }
-
-        alert("Reseñas guardadas. ¡Gracias!");
-        closeReviewModal();
-      } catch (err) {
-        console.error("Error guardando reseñas:", err);
-        alert("Error guardando reseñas. Revisa la consola.");
-      } finally {
-        reviewSave.disabled = false;
-      }
-    });
-  }
-
-  // Expose helper to open review modal with items
-  window.__openReviewModal = function(orderKey, products) {
-    if (!reviewOverlay || !reviewBody) return;
-    reviewBody.innerHTML = "";
-    reviewBody.dataset.orderKey = orderKey || null;
-
-    // Build UI rows
-    products.forEach(p => {
-      const keyAttr = p.productKey ? `data-product-key="${escapeHtml(p.productKey)}"` : "";
-      const node = document.createElement("div");
-      node.className = "review-item";
-      node.dataset.productName = p.name;
-      if (p.productKey) node.dataset.productKey = p.productKey;
-      node.dataset.selectedStars = "0";
-
-      const starsHtml = Array.from({length:5}).map((_, i) =>
-        `<span class="star" data-star="${i+1}" title="${i+1} estrella(s)">★</span>`
-      ).join("");
-
-      node.innerHTML = `
-        <div class="product-name">${escapeHtml(p.name)}</div>
-        <div class="stars">${starsHtml}</div>
-        <textarea class="review-comment" placeholder="Escribe un comentario opcional..." rows="3"></textarea>
-      `;
-      reviewBody.appendChild(node);
-
-      // wiring stars
-      const starEls = node.querySelectorAll(".star");
-      starEls.forEach(s => {
-        s.addEventListener("click", () => {
-          const n = Number(s.dataset.star || 0);
-          node.dataset.selectedStars = String(n);
-          // update UI
-          starEls.forEach(se => {
-            const val = Number(se.dataset.star || 0);
-            if (val <= n) se.classList.add("active"); else se.classList.remove("active");
-          });
-          // show textarea when at least 1 star
-          const ta = node.querySelector(".review-comment");
-          if (ta) ta.style.display = (n > 0) ? "block" : "none";
-        });
-      });
-
-      // if product comes with preselected rating (optional), apply
-      if (p.preStars && Number(p.preStars) > 0) {
-        const n = Number(p.preStars);
-        node.dataset.selectedStars = String(n);
-        node.querySelectorAll(".star").forEach(se => {
-          const val = Number(se.dataset.star || 0);
-          if (val <= n) se.classList.add("active"); else se.classList.remove("active");
-        });
-        const ta = node.querySelector(".review-comment");
-        if (ta) ta.style.display = "block";
-      }
-    });
-
-    // show overlay
-    reviewOverlay.style.display = "flex";
-    reviewOverlay.setAttribute("aria-hidden", "false");
-    document.documentElement.style.overflow = "hidden";
-    window.addEventListener("keydown", reviewKeyHandler);
-    const first = reviewBody.querySelector(".star");
-    if (first) first.focus();
-  };
-
-  // small slug helper used by save
-  function slugify(s) {
-    return String(s || "").toLowerCase().trim()
-      .replace(/[^a-z0-9\u00C0-\u017F -]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-");
-  }
 })();
 
 // Verificar elementos necesarios
 if (!loadingEl || !listEl) {
-  // silencioso: permitimos que la página cargue sin errores
+  // no hacemos throw, solo evitamos fallos posteriores
 }
 
 // manejadores opcionales
@@ -343,6 +181,63 @@ function getCurrentUserInfo() {
   const u = auth.currentUser;
   if (!u) return { uid: null, email: null, displayName: null };
   return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
+}
+
+// util: slugify simple (para fallback productKey)
+function slugify(s) {
+  return String(s || "").toLowerCase().replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "");
+}
+// util: generar productKey a partir de item.raw o nombre (preferir id/sku/row)
+function getProductKeyFromRaw(raw, name) {
+  if (!raw) return slugify(name);
+  const cand = raw.id || raw.sku || raw.row || raw.ref || raw.code;
+  if (cand !== undefined && cand !== null) {
+    const s = String(cand).trim();
+    if (s !== "" && s !== "-" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined") return s;
+  }
+  // fallback slug
+  return slugify(name);
+}
+
+// DB helpers para reseñas
+async function fetchExistingReview(productKey, uid) {
+  if (!productKey || !uid) return null;
+  try {
+    const snap = await get(ref(db, `reviewsByProduct/${productKey}`));
+    if (!snap.exists()) return null;
+    const val = snap.val();
+    for (const k of Object.keys(val)) {
+      const r = val[k];
+      if (r && r.user && String(r.user.uid) === String(uid)) {
+        return { id: k, data: r };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn("fetchExistingReview error:", e);
+    return null;
+  }
+}
+
+async function createReview(productKey, productName, stars, comment) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("not_authenticated");
+  const payload = {
+    productName: productName || "",
+    stars: Number(stars || 0),
+    comment: comment ? String(comment).trim() : "",
+    user: { uid: user.uid, email: user.email || "" },
+    createdAt: Date.now()
+  };
+  const pRef = ref(db, `reviewsByProduct/${productKey}`);
+  const pushed = await push(pRef, payload);
+  return { id: pushed.key, data: payload };
+}
+
+async function updateReview(productKey, reviewId, payload) {
+  if (!productKey || !reviewId) throw new Error("invalid_params");
+  await update(ref(db, `reviewsByProduct/${productKey}/${reviewId}`), payload);
+  return true;
 }
 
 // Escuchar pedidos del usuario con fallback a /orders
@@ -411,7 +306,7 @@ function renderOrdersObject(obj) {
     const idPedido = order.idPedido || key;
     const cliente  = order.cliente || order.userEmail || "Sin cliente";
     const resumen  = order.resumen || summarizeOrder(order) || "Sin resumen";
-    const estado   = (order.estado || order.status || "pendiente").toString();
+    const estado   = order.estado || order.status || "pendiente";
     const total    = Number(order.total || 0);
 
     const createdTxt = order.createdAt
@@ -421,9 +316,6 @@ function renderOrdersObject(obj) {
     const article = document.createElement("article");
     article.className = "order-card";
     article.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
-    // "Dejar reseña" only if estado is 'entregado' (case-insensitive)
-    const isEntregado = String(estado).toLowerCase() === "entregado";
-
     article.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
@@ -440,7 +332,6 @@ function renderOrdersObject(obj) {
       <div style="margin-top:10px;color:#cbd5e1;font-size:14px;">${escapeHtml(resumen)}</div>
       <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;">
         <button class="btn-view-invoice" data-order-key="${escapeHtml(String(key))}" style="background-color:rgba(255,255,255,0.95);border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:#111">📄 Ver Factura</button>
-        ${isEntregado ? `<button class="btn-leave-review" data-order-key="${escapeHtml(String(key))}" style="margin-left:8px;background:transparent;border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;color:#e5e7eb;cursor:pointer">⭐ Dejar reseña</button>` : ''}
       </div>
     `;
     frag.appendChild(article);
@@ -448,67 +339,17 @@ function renderOrdersObject(obj) {
 
   listEl.appendChild(frag);
 
-  // delegación: un solo handler para todos los botones "Ver Factura" y "Dejar reseña"
+  // delegación: un solo handler para todos los botones "Ver Factura"
   listEl.onclick = (e) => {
-    const btn = e.target.closest ? e.target.closest(".btn-view-invoice, .btn-leave-review") : null;
+    const btn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
     if (!btn) return;
     const orderKey = btn.dataset.orderKey;
     if (!orderKey) return;
     const order = currentOrdersMap[orderKey];
     if (!order) return;
-
-    if (btn.classList.contains("btn-view-invoice")) {
-      const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
-      showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
-      return;
-    }
-
-    if (btn.classList.contains("btn-leave-review")) {
-      // build products list for review modal
-      const products = buildProductsForReview(order);
-      // open modal
-      window.__openReviewModal(orderKey, products);
-      return;
-    }
+    const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
+    showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
   };
-}
-
-// Construye array de productos { name, qty, productKey? } desde order.items / cart / resumen
-function buildProductsForReview(order) {
-  let rawItems = Array.isArray(order.items) ? order.items
-               : (Array.isArray(order.cart) ? order.cart : []);
-
-  const products = [];
-
-  if (rawItems && rawItems.length) {
-    rawItems.forEach(it => {
-      const name = it.nombre || it.name || it.title || "Producto";
-      const qty = (it.cantidad !== undefined) ? Number(it.cantidad) : (it.qty !== undefined ? Number(it.qty) : (it.quantity !== undefined ? Number(it.quantity) : 1));
-      // if sheetKey & row exist in item, create productKey
-      const sheetKey = it.sheetKey || it.sheet || it.sheet_key || null;
-      const row = it.row || it.rowId || it.r || null;
-      const productKey = (sheetKey && row) ? `${sheetKey}::${row}` : (it.id ? String(it.id) : null);
-      products.push({ name: String(name), qty: Number(qty || 1), productKey: productKey || null });
-    });
-    return products;
-  }
-
-  // fallback: parse resumen "1 x Nombre | 2 x Otro"
-  if (order.resumen) {
-    const parts = String(order.resumen).split(/\s*\|\s*/).filter(Boolean);
-    parts.forEach(p => {
-      const m = p.match(/^(\d+)\s*x\s*(.+)$/i);
-      if (m) {
-        products.push({ name: m[2].trim(), qty: Number(m[1]), productKey: null });
-      } else {
-        products.push({ name: p.trim(), qty: 1, productKey: null });
-      }
-    });
-    return products;
-  }
-
-  // no items
-  return [];
 }
 
 // Mostrar modal con detalles (items normalizados + fallback resumen)
@@ -529,12 +370,14 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
     const qty = (qtyRaw === null || qtyRaw === "" || isNaN(Number(qtyRaw))) ? null : Number(qtyRaw);
     const priceRaw = (it.precioUnitario !== undefined) ? it.precioUnitario : (it.precioUnitaria !== undefined ? it.precioUnitaria : (it.price !== undefined ? it.price : null));
     const price = (priceRaw === null || priceRaw === "" || isNaN(Number(priceRaw))) ? null : Number(priceRaw);
-    return { name: String(name), qty, price, raw: it };
+    const productKey = getProductKeyFromRaw(it, name);
+    return { name: String(name), qty, price, raw: it, productKey };
   });
 
   let itemsHtml = "";
 
   if (itemsToRender.length) {
+    const orderEstadoLower = (order.estado || order.status || "pendiente").toString().toLowerCase();
     const rows = itemsToRender.map(it => {
       const nm = escapeHtml(it.name);
       const qtyTxt = (it.qty === null) ? "—" : escapeHtml(String(it.qty));
@@ -553,11 +396,17 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
         }
       }
 
+      // Si pedido está entregado, añadimos botón "Dejar reseña"
+      const reviewBtnHtml = (orderEstadoLower === "entregado")
+        ? `<div style="margin-top:8px"><button class="btn-review" data-product-key="${escapeHtml(it.productKey)}" data-product-name="${escapeHtml(it.name)}" style="padding:6px 10px;border-radius:8px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;cursor:pointer">⭐ Dejar reseña</button></div>`
+        : "";
+
       return `
         <tr>
           <td>
             <strong>${nm}</strong>
             ${refCandidate ? `<div class="invoice-small" style="margin-top:6px">Ref: ${escapeHtml(refCandidate)}</div>` : ""}
+            ${reviewBtnHtml}
           </td>
           <td style="text-align:center;">${qtyTxt}</td>
           <td style="text-align:right;">${priceTxt}</td>
@@ -657,6 +506,16 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
   const overlayElem = document.getElementById("invoice-overlay");
   if (overlayElem) overlayElem.scrollTop = 0;
   if (contentEl) contentEl.scrollTop = 0;
+
+  // Delegado dentro del contenido: manejar clicks en botones .btn-review
+  contentEl.onclick = async (ev) => {
+    const btn = ev.target.closest ? ev.target.closest(".btn-review") : null;
+    if (!btn) return;
+    const productKey = btn.dataset.productKey;
+    const productName = btn.dataset.productName;
+    if (!productKey) return;
+    openReviewModal(productKey, productName);
+  };
 }
 
 // resumen para listar
@@ -691,6 +550,117 @@ function renderError(err, userCtx = null) {
   }
 
   if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f97373;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
+}
+
+/* =============================
+   REVIEW MODAL (abrir / render / guardar)
+   ============================= */
+function getReviewModalElements() {
+  const overlay = document.getElementById("review-overlay");
+  const body = document.getElementById("review-body");
+  return { overlay, body };
+}
+
+async function openReviewModal(productKey, productName) {
+  const user = auth.currentUser;
+  if (!user) { alert("Debes iniciar sesión para dejar reseñas."); return; }
+
+  const { overlay, body } = getReviewModalElements();
+  if (!overlay || !body) return;
+
+  // limpiar
+  body.innerHTML = `<div style="color:#9ca3af">Cargando...</div>`;
+  overlay.style.display = "flex";
+  overlay.setAttribute("aria-hidden", "false");
+
+  // buscar reseña existente del usuario para este producto
+  const existing = await fetchExistingReview(productKey, user.uid);
+
+  // construir UI
+  const existingNote = existing ? `<div class="review-note">Ya dejaste una reseña para este producto. Puedes editarla aquí.</div>` : `<div class="review-note">Puedes dejar una reseña pública para este producto. Solo una reseña por usuario.</div>`;
+
+  const initialStars = existing ? Number(existing.data.stars || 0) : 0;
+  const initialComment = existing ? (existing.data.comment || "") : "";
+
+  body.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="font-weight:700">${escapeHtml(productName)}</div>
+      <div style="font-size:12px;color:#9ca3af">Producto: <strong style="color:#e5e7eb">${escapeHtml(productKey)}</strong></div>
+    </div>
+
+    <div class="review-stars" id="review-stars" aria-label="Seleccionar calificación">
+      ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" role="button" aria-label="${n} estrellas">★</span>`).join("")}
+    </div>
+
+    <textarea id="review-comment" class="review-comment" placeholder="Escribe un comentario (opcional)">${escapeHtml(initialComment)}</textarea>
+
+    ${existingNote}
+
+    <div class="review-actions">
+      <button id="review-cancel" class="btn-ghost btn-small" style="background:transparent;border:1px solid rgba(148,163,184,0.06);color:#e5e7eb">Cerrar</button>
+      <button id="review-save" class="btn-invoice-action">${existing ? "Actualizar reseña" : "Guardar reseña"}</button>
+    </div>
+  `;
+
+  // set initial stars visual
+  setStarsUI(initialStars);
+
+  // handlers
+  const starsContainer = body.querySelector("#review-stars");
+  let currentStars = initialStars;
+
+  starsContainer.onclick = (e) => {
+    const s = e.target.closest && e.target.closest(".star");
+    if (!s) return;
+    const v = Number(s.dataset.value || 0);
+    currentStars = v;
+    setStarsUI(v);
+  };
+
+  body.querySelector("#review-cancel").onclick = () => {
+    hideReviewModal();
+  };
+
+  body.querySelector("#review-save").onclick = async () => {
+    try {
+      const comment = document.getElementById("review-comment").value || "";
+      if (!currentStars || currentStars < 1) {
+        if (!confirm("No seleccionaste estrellas. ¿Deseas enviar la reseña sin calificación?")) return;
+      }
+      // si hay existing => update; si no => create
+      if (existing) {
+        const payload = { stars: Number(currentStars || 0), comment: comment, updatedAt: Date.now() };
+        await updateReview(productKey, existing.id, payload);
+        alert("Reseña actualizada.");
+      } else {
+        await createReview(productKey, productName, Number(currentStars || 0), comment);
+        alert("Reseña guardada.");
+      }
+      hideReviewModal();
+    } catch (err) {
+      console.error("Error guardando reseña:", err);
+      alert("No se pudo guardar la reseña. Revisa la consola.");
+    }
+  };
+}
+
+function hideReviewModal() {
+  const { overlay, body } = getReviewModalElements();
+  if (!overlay) return;
+  overlay.style.display = "none";
+  overlay.setAttribute("aria-hidden", "true");
+  if (body) body.innerHTML = "";
+}
+
+// marcar estrellas UI
+function setStarsUI(n) {
+  const container = document.getElementById("review-body")?.querySelector?.("#review-stars");
+  if (!container) return;
+  container.querySelectorAll(".star").forEach(s => {
+    const v = Number(s.dataset.value || 0);
+    if (v <= n) s.classList.add("filled");
+    else s.classList.remove("filled");
+  });
 }
 
 export {}; // evita export accidental de variables globales en módulo
