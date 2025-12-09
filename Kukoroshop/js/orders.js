@@ -10,10 +10,12 @@ const userLabel = document.getElementById("user-label");
 const cartBtn = document.getElementById("cart-icon-btn");
 const adminBtn = document.getElementById("admin-panel-btn");
 
-// INYECTAR ESTILOS Y MODAL PARA LA FACTURA (Auto-ejecutable)
-(function setupInvoiceUI() {// ====== setupInvoiceUI (reemplaza la existente) ======
+// Estado local: mapa de pedidos renderizados (clave -> order)
+let currentOrdersMap = {};
+
+// ====== setup UI / modal de factura ======
 (function setupInvoiceUI() {
-  // quitar si ya existe (evita duplicados en hot-reload)
+  // evitar duplicados en hot-reload
   if (document.getElementById('invoice-overlay')) return;
 
   const style = document.createElement('style');
@@ -56,10 +58,19 @@ const adminBtn = document.getElementById("admin-panel-btn");
   `;
   document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-  // wiring seguro de eventos
   const overlay = document.getElementById('invoice-overlay');
   const closeBtn = document.getElementById('close-invoice-btn');
   const printBtn = document.getElementById('print-invoice-btn');
+
+  // handler ESC (declarado aquí para poder añadir y remover)
+  function handleEsc(ev) {
+    if (ev.key === 'Escape') {
+      overlay.style.display = 'none';
+      overlay.setAttribute('aria-hidden', 'true');
+      document.documentElement.style.overflow = '';
+      window.removeEventListener('keydown', handleEsc);
+    }
+  }
 
   if (closeBtn) closeBtn.addEventListener('click', () => {
     overlay.style.display = 'none';
@@ -81,16 +92,175 @@ const adminBtn = document.getElementById("admin-panel-btn");
   // print
   if (printBtn) printBtn.addEventListener('click', () => window.print());
 
-  // escape key
-  function handleEsc(ev) {
-    if (ev.key === 'Escape') { overlay.style.display = 'none'; overlay.setAttribute('aria-hidden','true'); document.documentElement.style.overflow = ''; window.removeEventListener('keydown', handleEsc); }
-  }
+  // expose helper to open modal from other functions
+  window.__showInvoiceOverlay = function() {
+    overlay.style.display = 'flex';
+    overlay.setAttribute('aria-hidden', 'false');
+    document.documentElement.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleEsc);
+  };
+
+  window.__hideInvoiceOverlay = function() {
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
+    document.documentElement.style.overflow = '';
+    window.removeEventListener('keydown', handleEsc);
+  };
 })();
 
-// ====== showInvoiceDetails robusta (reemplaza la existente) ======
+// Safety: ensure required nodes exist
+if (!loadingEl || !listEl) {
+  console.warn("Elementos de UI de pedidos no encontrados.");
+}
+
+// Optional handlers
+cartBtn?.addEventListener("click", () => { /* abrir carrito */ });
+adminBtn?.addEventListener("click", () => location.href = "admin.html");
+
+// Escuchar estado de autenticación
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return window.location.href = "index.html";
+
+  if (userLabel) userLabel.textContent = user.email || "";
+
+  try { await auth.currentUser.getIdToken(true); } catch (err) { console.warn("No se pudo refrescar token:", err); }
+
+  listenUserOrders(user.uid, user.email || "");
+});
+
+// Obtener info actual del usuario
+function getCurrentUserInfo() {
+  const u = auth.currentUser;
+  if (!u) return { uid: null, email: null, displayName: null };
+  return { uid: u.uid || null, email: u.email || null, displayName: u.displayName || null };
+}
+
+// Escuchar y cargar pedidos del usuario (con fallback)
+function listenUserOrders(uid, email) {
+  loadingEl && (loadingEl.style.display = "block");
+  listEl && (listEl.style.display = "none");
+  if (listEl) listEl.innerHTML = "";
+
+  const userOrdersRef = ref(db, `users/${uid}/orders`);
+
+  onValue(userOrdersRef, async (snap) => {
+    try {
+      const val = snap.val();
+      if (val && Object.keys(val).length) {
+        renderOrdersObject(val);
+        return;
+      }
+
+      // Fallback a /orders y filtrar por uid o email
+      const ordersRef = ref(db, "orders");
+      const ordersSnap = await get(ordersRef);
+      const all = ordersSnap.val() || {};
+
+      const filtered = Object.fromEntries(
+        Object.entries(all).filter(([k, o]) => {
+          if (!o) return false;
+          if (o.uid && String(o.uid) === String(uid)) return true;
+          if (o.userEmail && String(o.userEmail).toLowerCase() === String(email).toLowerCase()) return true;
+          if (o.cliente && String(o.cliente).toLowerCase() === String(email).toLowerCase()) return true;
+          return false;
+        })
+      );
+
+      if (Object.keys(filtered).length) {
+        renderOrdersObject(filtered);
+      } else {
+        renderEmpty();
+      }
+    } catch (err) {
+      const ctx = getCurrentUserInfo();
+      console.error("Error leyendo orders (fallback):", err, "requesting user:", ctx);
+      renderError(err, ctx);
+    }
+  }, (err) => {
+    const ctx = getCurrentUserInfo();
+    console.error("Error listening user orders:", err, "requesting user:", ctx);
+    renderError(err, ctx);
+  });
+}
+
+// Renderiza pedidos (y guarda en currentOrdersMap)
+function renderOrdersObject(obj) {
+  currentOrdersMap = {}; // reset
+  loadingEl && (loadingEl.style.display = "none");
+  listEl && (listEl.style.display = "block");
+  if (!listEl) return;
+
+  const entries = Object.entries(obj).sort((a, b) => {
+    const ta = a[1]?.createdAt ? Date.parse(a[1].createdAt) || a[1].createdAt : (a[1]?.createdAt || 0);
+    const tb = b[1]?.createdAt ? Date.parse(b[1].createdAt) || b[1].createdAt : (b[1]?.createdAt || 0);
+    return tb - ta;
+  });
+
+  if (!entries.length) {
+    return renderEmpty();
+  }
+
+  listEl.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  entries.forEach(([key, order]) => {
+    currentOrdersMap[key] = order;
+
+    const idPedido = order.idPedido || key;
+    const cliente  = order.cliente || order.userEmail || "Sin cliente";
+    const resumen  = order.resumen || summarizeOrder(order) || "Sin resumen";
+    const estado   = order.estado || order.status || "pendiente";
+    const total    = Number(order.total || 0);
+
+    const createdAt = order.createdAt ? new Date(order.createdAt) : null;
+    const createdTxt = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleString() : (typeof order.createdAt === 'number' ? new Date(order.createdAt).toLocaleString() : "—");
+
+    // botón con data-order-key
+    const item = document.createElement('article');
+    item.className = "order-card";
+    item.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
+    item.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:600">Pedido: ${escapeHtml(String(idPedido))}</div>
+          <div style="color:#666;font-size:13px;margin-top:4px">Fecha: ${escapeHtml(createdTxt)} · Cliente: ${escapeHtml(cliente)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700">${fmtPrice(total)}</div>
+          <div style="margin-top:6px">
+            <span class="estado" style="padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:12px;">${escapeHtml(estado)}</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;color:#444;font-size:14px;">${escapeHtml(resumen)}</div>
+      <div style="margin-top:12px; border-top:1px solid #eee; padding-top:8px; text-align:right;">
+        <button class="btn-view-invoice" data-order-key="${key}" style="background-color:#fff;border:1px solid #ccc;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;">📄 Ver Factura</button>
+      </div>
+    `;
+    fragment.appendChild(item);
+  });
+
+  listEl.appendChild(fragment);
+
+  // Delegación: evento para botones "Ver Factura"
+  listEl.onclick = (e) => {
+    const btn = e.target.closest && e.target.closest('.btn-view-invoice');
+    if (!btn) return;
+    const orderKey = btn.dataset.orderKey;
+    const order = currentOrdersMap[orderKey];
+    if (!order) {
+      console.error("Pedido no encontrado en mapa local para key:", orderKey);
+      return;
+    }
+    // uso createdAt para mostrar fecha legible
+    const createdTxt = order.createdAt ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString()) : "—";
+    showInvoiceDetails(order, order.idPedido || orderKey, createdTxt);
+  };
+}
+
+// Mostrar modal con detalles (robusta)
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
   try {
-    // checks rápidos
     if (!order || typeof order !== 'object') {
       console.error("showInvoiceDetails: order inválido", order);
       return;
@@ -103,10 +273,8 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
       return;
     }
 
-    // DEBUG: log de contexto
-    console.log("showInvoiceDetails called — id:", idDisplay, "orderKey sample:", order.idPedido || "(no id)","user:", (auth.currentUser && auth.currentUser.email) || null);
+    console.log("showInvoiceDetails called — id:", idDisplay, "user:", (auth.currentUser && auth.currentUser.email) || null);
 
-    // construir items (igual que antes)
     const items = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
     let itemsHtml = '';
     if (items.length) {
@@ -167,17 +335,17 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
 
     contentEl.innerHTML = html;
 
-    // mostrar modal: set display y bloquear scroll de fondo
-    overlay.style.display = 'flex';
-    overlay.setAttribute('aria-hidden', 'false');
-    document.documentElement.style.overflow = 'hidden';
-    // forzar repaint y scroll to top del modal body
+    // mostrar modal y bloquear scroll
+    if (typeof window.__showInvoiceOverlay === 'function') window.__showInvoiceOverlay();
+    else {
+      overlay.style.display = 'flex';
+      overlay.setAttribute('aria-hidden', 'false');
+      document.documentElement.style.overflow = 'hidden';
+    }
+
+    // forzar scroll al top del modal
     overlay.scrollTop = 0;
     contentEl.scrollTop = 0;
-
-    // add ESC handler once
-    const escHandler = (e) => { if (e.key === 'Escape') { overlay.style.display='none'; overlay.setAttribute('aria-hidden','true'); document.documentElement.style.overflow=''; window.removeEventListener('keydown', escHandler); } };
-    window.addEventListener('keydown', escHandler);
 
     console.log(`✅ Modal mostrado para ID: ${idDisplay}`, { overlayVisible: overlay.style.display, contentLength: contentEl.innerHTML.length });
   } catch (err) {
@@ -185,37 +353,36 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
   }
 }
 
-
 function summarizeOrder(order) {
-  if (!order) return "";
-  if (order.resumen) return order.resumen;
-  if (Array.isArray(order.items) && order.items.length) {
-    return order.items.slice(0,4).map(it => `${it.name || it.title || it.id || 'item'} x${it.qty||it.quantity||1}`).join(", ");
-  }
-  if (Array.isArray(order.cart) && order.cart.length) {
-    return order.cart.slice(0,4).map(it => `${it.name || it.id || 'item'} x${it.qty||1}`).join(", ");
-  }
-  return "";
+  if (!order) return "";
+  if (order.resumen) return order.resumen;
+  if (Array.isArray(order.items) && order.items.length) {
+    return order.items.slice(0,4).map(it => `${it.name || it.title || it.id || 'item'} x${it.qty||it.quantity||1}`).join(", ");
+  }
+  if (Array.isArray(order.cart) && order.cart.length) {
+    return order.cart.slice(0,4).map(it => `${it.name || it.id || 'item'} x${it.qty||1}`).join(", ");
+  }
+  return "";
 }
 
 function renderEmpty() {
-  loadingEl && (loadingEl.style.display = "none");
-  listEl && (listEl.style.display = "block");
-  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#777;text-align:center">No tienes pedidos registrados todavía.</div>`;
+  loadingEl && (loadingEl.style.display = "none");
+  listEl && (listEl.style.display = "block");
+  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#777;text-align:center">No tienes pedidos registrados todavía.</div>`;
 }
 
 function renderError(err, userCtx = null) {
-  loadingEl && (loadingEl.style.display = "none");
-  listEl && (listEl.style.display = "block");
-  const msg = (err && err.message) ? escapeHtml(err.message) : "Error desconocido";
+  loadingEl && (loadingEl.style.display = "none");
+  listEl && (listEl.style.display = "block");
+  const msg = (err && err.message) ? escapeHtml(err.message) : "Error desconocido";
 
-  let userInfoHtml = "";
-  if (userCtx) {
-    const u = escapeHtml(String(userCtx.uid || "null"));
-    const e = escapeHtml(String(userCtx.email || "null"));
-    const d = escapeHtml(String(userCtx.displayName || "null"));
-    userInfoHtml = `<div style="margin-top:8px;font-size:12px;color:#999">Request user — uid: ${u} · email: ${e} · name: ${d}</div>`;
-  }
+  let userInfoHtml = "";
+  if (userCtx) {
+    const u = escapeHtml(String(userCtx.uid || "null"));
+    const e = escapeHtml(String(userCtx.email || "null"));
+    const d = escapeHtml(String(userCtx.displayName || "null"));
+    userInfoHtml = `<div style="margin-top:8px;font-size:12px;color:#999">Request user — uid: ${u} · email: ${e} · name: ${d}</div>`;
+  }
 
-  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f55;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
+  if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f55;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
 }
