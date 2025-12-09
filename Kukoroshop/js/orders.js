@@ -259,45 +259,76 @@ function renderOrdersObject(obj) {
 }
 
 // Mostrar modal con detalles (robusta)
+// Mostrar modal con detalles (parsea resumen si no hay items individuales)
 function showInvoiceDetails(order, idDisplay, dateDisplay) {
   try {
-    if (!order || typeof order !== 'object') {
-      console.error("showInvoiceDetails: order inválido", order);
-      return;
-    }
+    if (!order || typeof order !== 'object') return;
 
     const overlay = document.getElementById('invoice-overlay');
     const contentEl = document.getElementById('invoice-content');
-    if (!overlay || !contentEl) {
-      console.error("showInvoiceDetails: elementos del modal no encontrados", { overlay: !!overlay, contentEl: !!contentEl });
-      return;
+    if (!overlay || !contentEl) return;
+
+    // Determinar lista de items a mostrar
+    let itemsToRender = [];
+
+    if (Array.isArray(order.items) && order.items.length) {
+      // items ya detallados: normalizar a { name, qty, price }
+      itemsToRender = order.items.map(it => ({
+        name: it.nombre || it.name || it.title || 'Producto',
+        qty: Number(it.cantidad ?? it.qty ?? it.quantity ?? 1),
+        price: (it.precioUnitario !== undefined ? Number(it.precioUnitario) : (it.price !== undefined ? Number(it.price) : null))
+      }));
+    } else if (order.resumen && String(order.resumen).trim()) {
+      // parsear resumen: "1 x Justice... | 2 x Otro..."
+      const parts = String(order.resumen).split(/\s*\|\s*/).map(p => p.trim()).filter(Boolean);
+      itemsToRender = parts.map(part => {
+        const m = part.match(/^(\d+)\s*x\s*(.+)$/i);
+        if (m) {
+          return { name: m[2].trim(), qty: Number(m[1]), price: null };
+        }
+        // fallback: todo el string en nombre
+        return { name: part, qty: '', price: null };
+      });
     }
 
-    console.log("showInvoiceDetails called — id:", idDisplay, "user:", (auth.currentUser && auth.currentUser.email) || null);
-
-    const items = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
+    // Construir html de filas
     let itemsHtml = '';
-    if (items.length) {
-      itemsHtml = items.map(it => {
-        const nm = escapeHtml(it.nombre || it.name || it.title || 'Producto');
-        const qty = Number(it.cantidad || it.qty || it.quantity || 1);
-        const price = (it.precioUnitario !== undefined ? Number(it.precioUnitario) : (it.price || 0));
-        const lineTotal = (price * qty) || 0;
-        return `<tr><td><strong>${nm}</strong><div style="font-size:12px;color:#888;">Ref: ${escapeHtml(it.id || '-')}</div></td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${fmtPrice(price)}</td><td style="text-align:right;">${fmtPrice(lineTotal)}</td></tr>`;
+    if (itemsToRender.length) {
+      const rows = itemsToRender.map(it => {
+        const nm = escapeHtml(String(it.name || 'Producto'));
+        const qty = (it.qty === '' || it.qty === null || typeof it.qty === 'undefined') ? '—' : escapeHtml(String(it.qty));
+        const priceCell = (typeof it.price === 'number' && !isNaN(it.price)) ? fmtPrice(it.price) : '—';
+        const lineTotal = (typeof it.price === 'number' && !isNaN(it.price) && it.qty) ? fmtPrice(it.price * Number(it.qty)) : '—';
+        return `<tr>
+          <td><strong>${nm}</strong><div style="font-size:12px;color:#888">Ref: ${escapeHtml(it.id || '-')}</div></td>
+          <td style="text-align:center;">${qty}</td>
+          <td style="text-align:right;">${priceCell}</td>
+          <td style="text-align:right;">${lineTotal}</td>
+        </tr>`;
       }).join('');
-      itemsHtml = `<table class="invoice-items-table"><thead><tr><th style="width:60%">Producto</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Precio</th><th style="text-align:right;">Total</th></tr></thead><tbody>${itemsHtml}</tbody></table>`;
-    } else if (order.resumen) {
-      itemsHtml = `<div style="margin:12px 0;padding:12px;border:1px dashed #ddd;border-radius:8px;background:#fafafa"><strong>Resumen:</strong><div style="margin-top:6px">${escapeHtml(order.resumen)}</div></div>`;
+      itemsHtml = `<table class="invoice-items-table">
+        <thead>
+          <tr>
+            <th style="width:60%">Producto</th>
+            <th style="text-align:center;">Cant.</th>
+            <th style="text-align:right;">Precio</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
     } else {
       itemsHtml = `<div style="text-align:center;padding:18px;color:#777">No hay detalle de items.</div>`;
     }
 
-    const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente no especificado");
+    // Datos cliente / totales
+    const clienteNameDisplay = escapeHtml(order.cliente || order.userEmail || "Cliente");
     const direccionDisplay = escapeHtml(order.shipping?.address || order.address || order.direccion || 'No especificada');
     const telefonoDisplay = escapeHtml(order.shipping?.phone || order.phone || order.telefono || '—');
     const shippingCost = Number(order.shipping?.cost || order.shippingCost || 0);
-    const subtotal = Number(order.subtotal || (order.total - shippingCost) || 0);
     const total = Number(order.total || 0);
+    // Si no hay subtotal, no intentamos calcularlo por item (no tenemos precios)
+    const subtotalTxt = (Number(order.subtotal) || (shippingCost > 0 ? (total - shippingCost) : total)) || 0;
 
     const html = `
       <div style="margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px;">
@@ -327,7 +358,7 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
       ${itemsHtml}
 
       <div style="border-top:2px solid #eee;padding-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotal)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Subtotal:</span><span>${fmtPrice(subtotalTxt)}</span></div>
         ${shippingCost > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Envío:</span><span>${fmtPrice(shippingCost)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px;margin-top:6px"><span>TOTAL:</span><span>${fmtPrice(total)}</span></div>
       </div>
@@ -343,13 +374,10 @@ function showInvoiceDetails(order, idDisplay, dateDisplay) {
       document.documentElement.style.overflow = 'hidden';
     }
 
-    // forzar scroll al top del modal
     overlay.scrollTop = 0;
     contentEl.scrollTop = 0;
-
-    console.log(`✅ Modal mostrado para ID: ${idDisplay}`, { overlayVisible: overlay.style.display, contentLength: contentEl.innerHTML.length });
   } catch (err) {
-    console.error("showInvoiceDetails EXCEPTION:", err);
+    // si ocurre algo no logeamos en consola (según pediste), pero puedes manejar aquí un UI fallback si quieres
   }
 }
 
