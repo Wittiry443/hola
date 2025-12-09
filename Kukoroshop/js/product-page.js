@@ -88,27 +88,31 @@ function slugify(str) {
     .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // quitar diacríticos
     .replace(/[^\w\s-]/g, "") // quitar caracteres extraños
     .trim()
-    .replace(/\s+/g, "-");
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 // Lee reseñas: intenta reviewsByProduct/{productKey} y luego reviewsBySlug/{slug}
 async function loadReviews(productKey, productName) {
   try {
     console.debug("[reviews] preguntando por productKey:", productKey);
-    // 1) intentamos por productKey
-    const snap1 = await get(ref(db, `reviewsByProduct/${productKey}`));
-    if (snap1.exists()) {
-      const val = snap1.val();
-      console.debug("[reviews] encontrado reviewsByProduct:", Object.keys(val).length);
-      const arr = Object.keys(val).map(k => ({ id: k, ...val[k] }));
-      // normalizar createdAt a número para ordenar
-      arr.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
-      arr.sort((a,b) => b.createdAt - a.createdAt);
-      return arr;
+
+    // 1) intentamos por productKey (tal cual)
+    if (productKey) {
+      const snap1 = await get(ref(db, `reviewsByProduct/${productKey}`));
+      if (snap1.exists()) {
+        const val = snap1.val();
+        console.debug("[reviews] encontrado reviewsByProduct:", Object.keys(val).length);
+        const arr = Object.keys(val).map(k => ({ id: k, ...val[k] }));
+        arr.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
+        arr.sort((a,b) => b.createdAt - a.createdAt);
+        return arr;
+      }
     }
 
-    // 2) fallback: intentar por slug del nombre (reviewsBySlug)
-    const slug = slugify(productName || productKey);
+    // 2) fallback: intentar por slug derivado del nombre (reviewsBySlug)
+    const slug = slugify(productName || productKey || "");
     if (slug) {
       console.debug("[reviews] no había en reviewsByProduct, probando reviewsBySlug:", slug);
       const snap2 = await get(ref(db, `reviewsBySlug/${slug}`));
