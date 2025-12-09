@@ -38,7 +38,7 @@ const cartTotalEl = document.getElementById("cart-total");
 let cartActionsContainer = document.getElementById("cart-actions");
 
 // ======================================
-// HELPERS DE STOCK
+// HELPERS DE STOCK (no modificados)
 // ======================================
 
 export function getReservedQty(sheetKey, row) {
@@ -125,7 +125,7 @@ export function refreshAllCardDisplays() {
 }
 
 // ======================================
-// CARRITO EN MEMORIA + ICONO
+// CARRITO EN MEMORIA + ICONO (no modificados)
 // ======================================
 
 export function getCartItems() {
@@ -148,7 +148,7 @@ export function updateCartUI() {
   return total;
 }
 
-// Añadir desde tarjeta de producto
+// Añadir desde tarjeta de producto (no modificado)
 export async function addToCartFromCard(card, qty, cache = lastProductsCache, lastLoadedSheetKey) {
   const sheetKeyRaw = card.dataset.sheetKey || lastLoadedSheetKey || "UNKNOWN";
   const sheetKey = mapToAvailableSheetKey(sheetKeyRaw) || sheetKeyRaw;
@@ -198,7 +198,7 @@ export async function addToCartFromCard(card, qty, cache = lastProductsCache, la
 }
 
 // ======================================
-// ELIMINAR DEL CARRITO
+// ELIMINAR DEL CARRITO (no modificado)
 // ======================================
 
 export function removeFromCart(idx) {
@@ -228,12 +228,9 @@ export function removeFromCart(idx) {
 }
 
 // ======================================
-// FINALIZAR COMPRA (ya lo tenías, sin tocarlo)
+// FINALIZAR COMPRA (no modificado)
 // ======================================
 
-/*
-  Devuelve: { successes: [{ item, newStock }], failures: [{ item, reason }] }
-*/
 export async function finalizePurchaseOnServer(items, cache = lastProductsCache) {
   const successes = [];
   const failures = [];
@@ -294,7 +291,7 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
 }
 
 // ======================================
-// PENDING ORDER: guardado local + retry al cargar
+// PENDING ORDER: guardado local + retry al cargar (ajustado para shipping)
 // ======================================
 
 function _savePendingOrderLocally(obj) {
@@ -345,7 +342,11 @@ window.addEventListener('load', () => {
 });
 
 // ======================================
-// SHIPPING MODAL (dinámico) - devuelve Promise<shipping|null>
+// SHIPPING MODAL (ahora con los 4 campos pedidos por ti)
+//  - Nombre completo
+//  - Número de teléfono
+//  - Dirección
+//  - Información adicional (para ubicar al repartidor)
 // ======================================
 
 function ensureShippingModalExists() {
@@ -359,28 +360,22 @@ function ensureShippingModalExists() {
       <h3 style="margin:0 0 8px 0">Dirección de envío</h3>
       <div style="max-height:60vh;overflow:auto" id="shipping-modal-body">
         <div style="display:grid;grid-template-columns:1fr;gap:8px">
-          <label style="font-weight:700">Calle / Dirección
-            <input id="shipping-addressLine" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+          <label style="font-weight:700">Nombre completo
+            <input id="shipping-fullName" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
           </label>
-          <div style="display:flex;gap:8px">
-            <label style="flex:1;font-weight:700">Ciudad
-              <input id="shipping-city" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
-            </label>
-            <label style="width:160px;font-weight:700">Departamento
-              <input id="shipping-state" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
-            </label>
-          </div>
-          <div style="display:flex;gap:8px">
-            <label style="flex:1;font-weight:700">Código postal
-              <input id="shipping-postalCode" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
-            </label>
-            <label style="width:160px;font-weight:700">Teléfono
-              <input id="shipping-phone" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
-            </label>
-          </div>
-          <label style="font-weight:700">Notas / dirección completa
-            <textarea id="shipping-fullAddress" rows="3" style="width:100%;padding:8px;border-radius:6px;margin-top:4px"></textarea>
+
+          <label style="font-weight:700">Número de teléfono
+            <input id="shipping-phone" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" placeholder="+57 3..." />
           </label>
+
+          <label style="font-weight:700">Dirección (calle / barrio / referencia)
+            <input id="shipping-address" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" />
+          </label>
+
+          <label style="font-weight:700">Información adicional (para ayudar al repartidor)
+            <textarea id="shipping-notes" rows="3" style="width:100%;padding:8px;border-radius:6px;margin-top:4px" placeholder="Piso, puerta, cómo llegar, punto de referencia..."></textarea>
+          </label>
+
           <label style="font-weight:700">
             <input type="checkbox" id="shipping-save-local" /> Guardar esta dirección en este equipo (local)
           </label>
@@ -395,28 +390,26 @@ function ensureShippingModalExists() {
   `;
   document.body.appendChild(overlay);
 
-  // prevent clicks propagating closing accidentally (overlay click cancels)
+  // overlay click cancela
   overlay.onclick = (e) => {
-    if (e.target === overlay) {
-      overlay.style.display = "none";
-      // don't remove saved promise handlers here; handlers manage resolve
-    }
+    if (e.target === overlay) overlay.style.display = "none";
   };
 }
 
 /**
  * Muestra modal de dirección. prefill: optional shipping object to fill inputs.
  * Retorna Promise resuelta con shipping object o null si cancela.
+ *
+ * shipping object returned: { fullName, phone, address, notes, addressLine }
+ * (addressLine agregado para compatibilidad con admin.js)
  */
 function showShippingModal(prefill = {}) {
   ensureShippingModalExists();
   const overlay = document.getElementById("shipping-modal-overlay");
-  const addrInp = document.getElementById("shipping-addressLine");
-  const cityInp = document.getElementById("shipping-city");
-  const stateInp = document.getElementById("shipping-state");
-  const postalInp = document.getElementById("shipping-postalCode");
+  const fullInp = document.getElementById("shipping-fullName");
   const phoneInp = document.getElementById("shipping-phone");
-  const fullInp = document.getElementById("shipping-fullAddress");
+  const addrInp = document.getElementById("shipping-address");
+  const notesInp = document.getElementById("shipping-notes");
   const saveChk = document.getElementById("shipping-save-local");
   const saveBtn = document.getElementById("shipping-save");
   const cancelBtn = document.getElementById("shipping-cancel");
@@ -427,39 +420,35 @@ function showShippingModal(prefill = {}) {
   })();
 
   const fill = prefill && Object.keys(prefill).length ? prefill : (stored || {});
-  addrInp.value = fill.addressLine || "";
-  cityInp.value = fill.city || "";
-  stateInp.value = fill.state || "";
-  postalInp.value = fill.postalCode || "";
+  fullInp.value = fill.fullName || fill.name || "";
   phoneInp.value = fill.phone || "";
-  fullInp.value = fill.fullAddress || "";
+  addrInp.value = fill.address || fill.addressLine || "";
+  notesInp.value = fill.notes || fill.fullAddress || "";
   saveChk.checked = !!stored;
 
   overlay.style.display = "flex";
 
   return new Promise((resolve) => {
     function doClose(val) {
-      // remove handlers
       saveBtn.onclick = null;
       cancelBtn.onclick = null;
       overlay.style.display = "none";
       resolve(val);
     }
 
-    cancelBtn.onclick = () => {
-      doClose(null);
-    };
+    cancelBtn.onclick = () => doClose(null);
 
     saveBtn.onclick = () => {
       const shipping = {
-        addressLine: addrInp.value.trim() || null,
-        city: cityInp.value.trim() || null,
-        state: stateInp.value.trim() || null,
-        postalCode: postalInp.value.trim() || null,
+        fullName: fullInp.value.trim() || null,
         phone: phoneInp.value.trim() || null,
-        fullAddress: fullInp.value.trim() || null
+        address: addrInp.value.trim() || null,
+        notes: notesInp.value.trim() || null
       };
-      // remove null-ish keys
+      // normalize: include addressLine for admin compatibility
+      if (shipping.address) shipping.addressLine = shipping.address;
+
+      // remove empty keys
       Object.keys(shipping).forEach(k => { if (shipping[k] === null || shipping[k] === "") delete shipping[k]; });
 
       // if user asked to save locally, persist minimal shipping
@@ -478,12 +467,9 @@ function showShippingModal(prefill = {}) {
 
 // ======================================
 // 🧾 HELPER: CREAR PEDIDO EN FIREBASE
-//    Compatible con createOrderInDB que devuelve string key o un objeto { ok, key }
+//    (compatible con createOrderInDB que devuelve string key o objeto { ok, key })
 // ======================================
 
-/**
- * extrae la key si createOrderInDB devuelve string o un objeto
- */
 function _extractKey(res) {
   if (!res) return null;
   if (typeof res === "string") return res;
@@ -491,10 +477,9 @@ function _extractKey(res) {
   return null;
 }
 
-/** 
- * Exportada para que otros módulos (modals.js) puedan crear la orden.
- * Ahora acepta second arg `shipping` que se incluirá en la orden guardada.
- * Devuelve { ok: boolean, firebaseKey: string|null, error: string|null, order }
+/**
+ * createOrderFromItems(items, shipping?)
+ * shipping: { fullName, phone, address, notes, addressLine? }
  */
 export async function createOrderFromItems(items, shipping = null) {
   if (!items || !items.length) return { ok: false, firebaseKey: null, error: "empty_items" };
@@ -535,28 +520,24 @@ export async function createOrderFromItems(items, shipping = null) {
   };
 
   if (shipping && Object.keys(shipping).length) {
-    order.shipping = shipping;
+    // aseguramos compatibilidad: shipping.addressLine también presente
+    const sh = { ...shipping };
+    if (sh.address && !sh.addressLine) sh.addressLine = sh.address;
+    order.shipping = sh;
   }
 
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
   try {
-    // Si hay usuario, aseguramos su registro en /users/{uid} (no bloqueante)
     if (user) {
-      try {
-        await ensureUserRecord(user);
-      } catch (e) {
-        console.warn("[orders] ensureUserRecord fallo (no crítico):", e);
-      }
+      try { await ensureUserRecord(user); } catch (e) { console.warn("[orders] ensureUserRecord fallo:", e); }
     }
 
-    // Guardar en Firebase (createOrderInDB puede devolver string o objeto)
     const res = await createOrderInDB(order, user);
     const key = _extractKey(res);
 
     if (!key) {
       console.error("[orders] createOrderInDB returned no key:", res);
-      // guardar pending y devolver error (incluimos shipping para retry)
       _savePendingOrderLocally({ items, shipping, createdAt: Date.now() });
       return { ok: false, firebaseKey: null, error: "no_key_returned", order };
     }
@@ -572,7 +553,7 @@ export async function createOrderFromItems(items, shipping = null) {
 }
 
 // ======================================
-// POPUP DEL CARRITO
+// POPUP DEL CARRITO + acciones (no modificadas)
 // ======================================
 
 export function openCartPopup() {
@@ -757,9 +738,10 @@ export async function sendToWhatsApp() {
       _savePendingOrderLocally({ items: paidItems, createdAt: Date.now() });
     }
 
-    // construir mensaje WA incluyendo dirección si existe en localStorage
+    // construir mensaje WA incluyendo dirección si existe (intentamos usar la guardada localmente)
     let shippingForMsg = null;
     try {
+      // preferimos la última guardada por el modal (localStorage used by modal when user checked save)
       shippingForMsg = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null");
     } catch (e) { shippingForMsg = null; }
 
@@ -772,12 +754,11 @@ export async function sendToWhatsApp() {
     message += `\nTotal: *$${total}*\n\n`;
 
     if (shippingForMsg) {
-      message += `📦 *Dirección de envío:*\n`;
-      if (shippingForMsg.addressLine) message += `${shippingForMsg.addressLine}\n`;
-      if (shippingForMsg.city || shippingForMsg.state) message += `${shippingForMsg.city || ""} ${shippingForMsg.state || ""}\n`;
-      if (shippingForMsg.postalCode) message += `CP: ${shippingForMsg.postalCode}\n`;
+      message += `📦 *Datos de envío:*\n`;
+      if (shippingForMsg.fullName) message += `Nombre: ${shippingForMsg.fullName}\n`;
       if (shippingForMsg.phone) message += `Tel: ${shippingForMsg.phone}\n`;
-      if (shippingForMsg.fullAddress) message += `${shippingForMsg.fullAddress}\n`;
+      if (shippingForMsg.address) message += `Dirección: ${shippingForMsg.address}\n`;
+      if (shippingForMsg.notes) message += `Info: ${shippingForMsg.notes}\n`;
       message += `\n`;
     }
 
@@ -825,7 +806,7 @@ export async function sendToWhatsApp() {
         console.log("[orders] WA partial order created:", createRes.firebaseKey);
       }
 
-      // preparar mensaje WA
+      // preparar mensaje WA (usamos lo guardado localmente si existe)
       let shippingForMsg = null;
       try { shippingForMsg = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null"); } catch(e){ shippingForMsg = null; }
 
@@ -837,12 +818,11 @@ export async function sendToWhatsApp() {
       });
       message += `\nTotal: *$${total}*\n\n`;
       if (shippingForMsg) {
-        message += `📦 *Dirección de envío:*\n`;
-        if (shippingForMsg.addressLine) message += `${shippingForMsg.addressLine}\n`;
-        if (shippingForMsg.city || shippingForMsg.state) message += `${shippingForMsg.city || ""} ${shippingForMsg.state || ""}\n`;
-        if (shippingForMsg.postalCode) message += `CP: ${shippingForMsg.postalCode}\n`;
+        message += `📦 *Datos de envío:*\n`;
+        if (shippingForMsg.fullName) message += `Nombre: ${shippingForMsg.fullName}\n`;
         if (shippingForMsg.phone) message += `Tel: ${shippingForMsg.phone}\n`;
-        if (shippingForMsg.fullAddress) message += `${shippingForMsg.fullAddress}\n`;
+        if (shippingForMsg.address) message += `Dirección: ${shippingForMsg.address}\n`;
+        if (shippingForMsg.notes) message += `Info: ${shippingForMsg.notes}\n`;
         message += `\n`;
       }
 
@@ -862,7 +842,7 @@ export async function sendToWhatsApp() {
 }
 
 // ======================================
-// PAGO CON TARJETA: flujo robusto (reemplaza la versión anterior)
+// PAGO CON TARJETA (ya adaptado para pedir shipping)
 // ======================================
 
 window._openCardPaymentModal = async function() {
@@ -941,7 +921,6 @@ window._openCardPaymentModal = async function() {
       }
     } catch (e) {
       console.warn("[checkout] shipping modal failed:", e);
-      // seguimos sin shipping
       shipping = null;
     }
 
@@ -1057,8 +1036,6 @@ window._onCardPaymentSuccess = async function(paymentMeta = {}) {
 
 // OPTIONAL: marcar orden como pagada en Firebase (implementa según tu esquema DB)
 window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
-  // Example implementation suggestion:
-  // import { ref, update } from 'firebase/database'; then update orders/{firebaseKey}: { estado:'pagado', paidAt:..., paymentMeta }
   console.log('[orders] markOrderAsPaid (placeholder) for', firebaseKey, paymentMeta);
   return true;
 };
@@ -1099,4 +1076,3 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
-
