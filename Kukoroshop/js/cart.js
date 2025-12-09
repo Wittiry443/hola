@@ -21,7 +21,7 @@ import {
 } from "./stock.js";
 
 // 🔥 IMPORTAMOS AUTH + HELPER PARA GUARDAR PEDIDOS EN FIREBASE
-import { auth, createOrderInDB } from "./firebase.js";
+import { auth, createOrderInDB, ensureUserRecord } from "./firebase.js";
 
 /* ------------------------------------------------------------------
    DEBUG: logs iniciales para saber que el módulo se cargó
@@ -345,10 +345,19 @@ window.addEventListener('load', () => {
 
 // ======================================
 // 🧾 HELPER: CREAR PEDIDO EN FIREBASE
-//    Compatible con createOrderInDB que devuelve string key
+//    Compatible con createOrderInDB que devuelve string key o un objeto { ok, key }
 // ======================================
 
-// ------------------ en js/cart.js ------------------
+/**
+ * extrae la key si createOrderInDB devuelve string o un objeto
+ */
+function _extractKey(res) {
+  if (!res) return null;
+  if (typeof res === "string") return res;
+  if (typeof res === "object") return res.key || res.firebaseKey || null;
+  return null;
+}
+
 /** 
  * Exportada para que otros módulos (modals.js) puedan crear la orden.
  * Devuelve { ok: boolean, firebaseKey: string|null, error: string|null, order }
@@ -393,12 +402,35 @@ export async function createOrderFromItems(items) {
 
   console.log("[orders] createOrderFromItems -> creating order:", order);
 
-try {
-    const key = await createOrderInDB(order, user); // <-- pasamos user
-    if (!key) return { ok: false, firebaseKey: null, error: "no_key_returned", order };
+  try {
+    // Si hay usuario, aseguramos su registro en /users/{uid} (no bloqueante)
+    if (user) {
+      try {
+        await ensureUserRecord(user);
+      } catch (e) {
+        console.warn("[orders] ensureUserRecord fallo (no crítico):", e);
+        // no abortamos la creación del pedido por esto
+      }
+    }
+
+    // Guardar en Firebase (createOrderInDB puede devolver string o objeto)
+    const res = await createOrderInDB(order, user);
+    const key = _extractKey(res);
+
+    if (!key) {
+      console.error("[orders] createOrderInDB returned no key:", res);
+      // guardar pending y devolver error
+      _savePendingOrderLocally({ items, createdAt: Date.now() });
+      return { ok: false, firebaseKey: null, error: "no_key_returned", order };
+    }
+
+    console.log("[orders] order saved ok, firebaseKey:", key);
     return { ok: true, firebaseKey: key, error: null, order };
   } catch (err) {
-    return { ok: false, firebaseKey: null, error: String(err), order };
+    console.error("[orders] createOrderFromItems EXCEPTION:", err);
+    const errMsg = err && err.message ? err.message : String(err);
+    _savePendingOrderLocally({ items, createdAt: Date.now() });
+    return { ok: false, firebaseKey: null, error: errMsg, order };
   }
 }
 
@@ -862,6 +894,7 @@ console.log('[orders] debug helpers: __wyvern_createOrderFromItems, __wyvern_ret
 
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
+
 
 
 
