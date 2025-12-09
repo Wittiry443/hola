@@ -56,37 +56,28 @@ export const db = getDatabase(app);
  * Crea un pedido: guarda en /orders (maestro) y copia en users/{uid}/orders/{key} si hay user.uid.
  * Devuelve { ok: true, key } o { ok: false, error }.
  */
+// en firebase.js
 export async function createOrderInDB(order, user) {
   try {
     const now = Date.now();
-    const payload = {
-      ...order,
-      createdAt: now,
-      uid: user?.uid || null,
-      userEmail: user?.email || null
-    };
+    const payload = { ...order, createdAt: now, uid: user?.uid || null, userEmail: user?.email || null };
 
-    console.log("[firebase] createOrderInDB -> payload:", payload);
-
-    // master record
-    const masterRef = push(ref(db, "orders"));
-    await set(masterRef, payload);
-    console.log(`[firebase] createOrderInDB -> saved master orders/${masterRef.key}`);
-
-    // copy into user node if possible
     if (user?.uid) {
-      await set(ref(db, `users/${user.uid}/orders/${masterRef.key}`), payload);
-      console.log(`[firebase] createOrderInDB -> saved users/${user.uid}/orders/${masterRef.key}`);
+      const newRef = push(ref(db, `users/${user.uid}/orders`));
+      await set(newRef, payload);
+      return { ok: true, key: newRef.key };
     } else {
-      console.log("[firebase] createOrderInDB -> no user.uid, saved only to /orders");
+      // invitados: guardarlos en orders_guest o en orders segun prefieras
+      const newRef = push(ref(db, `orders_guest`));
+      await set(newRef, payload);
+      return { ok: true, key: newRef.key };
     }
-
-    return { ok: true, key: masterRef.key };
   } catch (err) {
-    console.error("[firebase] createOrderInDB error:", err);
+    console.error("createOrderInDB error:", err);
     return { ok: false, error: String(err) };
   }
 }
+
 
 /**
  * ensureUserRecord: crea/actualiza /users/{uid} sin sobreescribir orders.
@@ -376,5 +367,6 @@ export {
   setAdminFlag as setAdminFlagExport,
   markOrderAsPaid as markOrderAsPaidExport
 };
+
 
 
