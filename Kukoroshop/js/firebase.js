@@ -56,35 +56,32 @@ export const db = getDatabase(app);
  *
  * Uso: const key = await createOrderInDB(order, auth.currentUser);
  */
-export async function createOrderInDB(order, user = null) {
+export async function createOrderInDB(order, user) {
   try {
     const now = Date.now();
-    // Normaliza payload (no sobreescribir createdAt si ya viene)
     const payload = {
       ...order,
-      createdAt: order.createdAt || now,
+      createdAt: now,
       uid: user?.uid || null,
       userEmail: user?.email || null
     };
 
-    // Push en /orders
-    const ordersRef = ref(db, "orders");
-    const newRef = push(ordersRef);
-    await set(newRef, payload);
-
-    // Copia en /users/{uid}/orders/{key} para facilitar "Mis pedidos"
     if (user?.uid) {
-      await set(ref(db, `users/${user.uid}/orders/${newRef.key}`), payload);
+      // guardamos el pedido bajo users/{uid}/orders/{key}
+      const newRef = push(ref(db, `users/${user.uid}/orders`));
+      await set(newRef, payload);
+      return { ok: true, key: newRef.key };
+    } else {
+      // si no hay usuario (invitado), puedes guardar en /orders_guest/{key} o en /orders
+      const newRef = push(ref(db, `orders_guest`));
+      await set(newRef, payload);
+      return { ok: true, key: newRef.key };
     }
-
-    console.log("[firebase] createOrderInDB -> saved, key:", newRef.key);
-    return newRef.key;
   } catch (err) {
-    console.error("[firebase] createOrderInDB ERROR:", err);
-    throw err; // el caller puede capturar el error
+    console.error("createOrderInDB error:", err);
+    return { ok: false, error: String(err) };
   }
 }
-
 /**
  * Crea/actualiza el registro público del usuario en /users/{uid}
  * - Guarda email, displayName, lastLogin y role ("admin" si existe /admins/{uid}, "client" por defecto)
@@ -127,3 +124,4 @@ export async function ensureUserRecord(user) {
     return { ok: false, error: String(err) };
   }
 }
+
