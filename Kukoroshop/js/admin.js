@@ -283,7 +283,7 @@ async function deleteOrder(orderKey) {
 }
 
 // ----------------------------------------------------
-// Modal de edición de pedido (dinámico)
+// Modal de edición de pedido (dinámico) - actualizado para nuevo esquema shipping
 // ----------------------------------------------------
 function ensureOrderEditModalExists() {
   if (document.getElementById("order-edit-modal-overlay")) return;
@@ -317,15 +317,36 @@ function openEditOrderModal(orderKey, order) {
   const overlay = document.getElementById("order-edit-modal-overlay");
   const body = document.getElementById("order-edit-body");
 
-  // normalizar shipping/direccion
-  const shipping = order.shipping || order.direccion || order.delivery || {};
-  const addr = {
-    addressLine: shipping.addressLine || shipping.calle || shipping.line || "",
-    city: shipping.city || shipping.ciudad || shipping.city || "",
-    state: shipping.state || shipping.departamento || shipping.state || "",
-    postalCode: shipping.postalCode || shipping.codigoPostal || shipping.postalCode || "",
-    phone: shipping.phone || shipping.telefono || shipping.phone || ""
-  };
+  // Normalizar shipping: soporta esquema nuevo y legacy
+  const shippingRaw = order.shipping || order.direccion || order.delivery || {};
+  // posible contenido legacy: { addressLine, city, state, postalCode, phone, fullAddress, notas, telefono, name, cliente }
+  const fullName =
+    shippingRaw.fullName ||
+    shippingRaw.name ||
+    shippingRaw.cliente ||
+    shippingRaw.contactName ||
+    order.cliente ||
+    "";
+  const phone =
+    shippingRaw.phone ||
+    shippingRaw.telefono ||
+    shippingRaw.contactPhone ||
+    shippingRaw.mobile ||
+    "";
+  // preferimos address field variants in this order
+  const address =
+    shippingRaw.address ||
+    shippingRaw.addressLine ||
+    shippingRaw.calle ||
+    shippingRaw.fullAddress ||
+    shippingRaw.direccion ||
+    "";
+  const notes =
+    shippingRaw.notes ||
+    shippingRaw.notas ||
+    shippingRaw.info ||
+    shippingRaw.fullAddress ||
+    "";
 
   const optionsHtml = ORDER_STATUSES.map(st => `<option value="${st}" ${st === (order.estado || "pendiente") ? "selected" : ""}>${st}</option>`).join("");
 
@@ -358,34 +379,28 @@ function openEditOrderModal(orderKey, order) {
     </div>
 
     <div style="margin-top:12px">
-      <h4 style="margin:0 0 8px 0">Dirección de envío</h4>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <h4 style="margin:0 0 8px 0">Dirección de envío (editable)</h4>
+      <div style="display:grid;grid-template-columns:1fr;gap:8px">
         <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Calle / Dirección</label>
-          <input id="order-edit-addressLine" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.addressLine)}" />
+          <label style="display:block;font-weight:700;margin-bottom:6px">Nombre completo</label>
+          <input id="order-edit-fullName" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(fullName)}" />
         </div>
+
         <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Ciudad</label>
-          <input id="order-edit-city" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.city)}" />
+          <label style="display:block;font-weight:700;margin-bottom:6px">Número de teléfono</label>
+          <input id="order-edit-phone" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(phone)}" />
         </div>
+
         <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Departamento / Estado</label>
-          <input id="order-edit-state" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.state)}" />
+          <label style="display:block;font-weight:700;margin-bottom:6px">Dirección</label>
+          <input id="order-edit-address" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(address)}" />
         </div>
+
         <div>
-          <label style="display:block;font-weight:700;margin-bottom:6px">Código postal</label>
-          <input id="order-edit-postalCode" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.postalCode)}" />
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label style="display:block;font-weight:700;margin-bottom:6px">Teléfono</label>
-          <input id="order-edit-phone" style="width:100%;padding:8px;border-radius:6px" value="${escapeHtml(addr.phone)}" />
+          <label style="display:block;font-weight:700;margin-bottom:6px">Información adicional / notas para el repartidor</label>
+          <textarea id="order-edit-notes" rows="3" style="width:100%;padding:8px;border-radius:6px">${escapeHtml(notes)}</textarea>
         </div>
       </div>
-    </div>
-
-    <div style="margin-top:12px">
-      <label style="display:block;font-weight:700;margin-bottom:6px">Notas internas / dirección completa (opcional)</label>
-      <textarea id="order-edit-notes" rows="3" style="width:100%;padding:8px;border-radius:6px">${escapeHtml((shipping.fullAddress || shipping.notas || ""))}</textarea>
     </div>
   `;
 
@@ -402,24 +417,18 @@ function openEditOrderModal(orderKey, order) {
 
   saveBtn.onclick = async () => {
     const newEstado = document.getElementById("order-edit-estado").value;
-    const addressLine = document.getElementById("order-edit-addressLine").value.trim();
-    const city = document.getElementById("order-edit-city").value.trim();
-    const state = document.getElementById("order-edit-state").value.trim();
-    const postalCode = document.getElementById("order-edit-postalCode").value.trim();
-    const phone = document.getElementById("order-edit-phone").value.trim();
-    const notes = document.getElementById("order-edit-notes").value.trim();
+    const fullNameNew = document.getElementById("order-edit-fullName").value.trim();
+    const phoneNew = document.getElementById("order-edit-phone").value.trim();
+    const addressNew = document.getElementById("order-edit-address").value.trim();
+    const notesNew = document.getElementById("order-edit-notes").value.trim();
 
     const shippingObj = {
-      addressLine: addressLine || null,
-      city: city || null,
-      state: state || null,
-      postalCode: postalCode || null,
-      phone: phone || null,
-      fullAddress: notes || null
+      // only include keys if value not empty (keep object minimal)
+      ...(fullNameNew ? { fullName: fullNameNew } : {}),
+      ...(phoneNew ? { phone: phoneNew } : {}),
+      ...(addressNew ? { address: addressNew, addressLine: addressNew } : {}),
+      ...(notesNew ? { notes: notesNew, fullAddress: notesNew } : {})
     };
-
-    // limpiar nulls innecesarios
-    Object.keys(shippingObj).forEach(k => { if (shippingObj[k] === null) delete shippingObj[k]; });
 
     try {
       // actualizar orders/{key}
@@ -450,8 +459,6 @@ function openEditOrderModal(orderKey, order) {
 }
 
 // -----------------------------------------------------------
-// Actualizar estado en Firebase (deprecated pero mantenido para compatibilidad)
-//-----------------------------------------------------------
 // Cargar productos desde Sheets
 //-----------------------------------------------------------
 async function loadProducts() {
@@ -628,6 +635,7 @@ async function deleteProduct(prod) {
 //-----------------------------------------------------------
 // FIN
 //-----------------------------------------------------------
+
 
 
 
