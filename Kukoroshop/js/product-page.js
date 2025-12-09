@@ -53,18 +53,23 @@ function parsePK(pk) {
 
 async function fetchProductFromAPI(sheetKey, row) {
   try {
-    const r = await fetch(`${API_URL}?sheetKey=${encodeURIComponent(sheetKey)}&_=${Date.now()}`, { cache: "no-store" });
+    const url = `${API_URL}?sheetKey=${encodeURIComponent(sheetKey)}&_=${Date.now()}`;
+    console.debug("[product-api] fetch URL:", url);
+    const r = await fetch(url, { cache: "no-store" });
     const data = await r.json();
     const products = data.products || [];
+    console.debug(`[product-api] response products count: ${products.length}`);
     const found = products.find(p => String(p.row) === String(row));
     if (found) {
       if (!found.sheetKey) found.sheetKey = sheetKey;
       found.data = found.data || {};
+      console.debug("[product-api] product found in API:", { row: found.row, sheetKey: found.sheetKey });
       return found;
     }
+    console.debug("[product-api] product NOT found in API for row:", row);
     return null;
   } catch (e) {
-    console.error("fetchProductFromAPI error", e);
+    console.error("fetchProductFromAPI error:", e);
     return null;
   }
 }
@@ -95,42 +100,62 @@ function slugify(str) {
 
 // Lee reseñas: intenta reviewsByProduct/{productKey} y luego reviewsBySlug/{slug}
 async function loadReviews(productKey, productName) {
-  try {
-    console.debug("[reviews] preguntando por productKey:", productKey);
+  console.groupCollapsed("[reviews] loadReviews start");
+  console.debug("Inputs:", { productKey, productName });
 
+  try {
     // 1) intentamos por productKey (tal cual)
     if (productKey) {
-      const snap1 = await get(ref(db, `reviewsByProduct/${productKey}`));
+      const path1 = `reviewsByProduct/${productKey}`;
+      console.debug("[reviews] querying path:", path1);
+      const snap1 = await get(ref(db, path1));
+      console.debug("[reviews] snap1.exists():", !!snap1.exists());
       if (snap1.exists()) {
         const val = snap1.val();
-        console.debug("[reviews] encontrado reviewsByProduct:", Object.keys(val).length);
+        console.debug("[reviews] snap1.val() keys:", Object.keys(val || {}).slice(0,20));
         const arr = Object.keys(val).map(k => ({ id: k, ...val[k] }));
         arr.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
         arr.sort((a,b) => b.createdAt - a.createdAt);
+        console.debug(`[reviews] returning ${arr.length} reviews from reviewsByProduct/${productKey}`);
+        console.groupEnd();
         return arr;
+      } else {
+        console.debug(`[reviews] no data at reviewsByProduct/${productKey}`);
       }
+    } else {
+      console.debug("[reviews] productKey empty or falsy, skipping reviewsByProduct");
     }
 
     // 2) fallback: intentar por slug derivado del nombre (reviewsBySlug)
     const slug = slugify(productName || productKey || "");
+    console.debug("[reviews] computed slug:", slug);
     if (slug) {
-      console.debug("[reviews] no había en reviewsByProduct, probando reviewsBySlug:", slug);
-      const snap2 = await get(ref(db, `reviewsBySlug/${slug}`));
+      const path2 = `reviewsBySlug/${slug}`;
+      console.debug("[reviews] querying fallback path:", path2);
+      const snap2 = await get(ref(db, path2));
+      console.debug("[reviews] snap2.exists():", !!snap2.exists());
       if (snap2.exists()) {
         const val2 = snap2.val();
+        console.debug("[reviews] snap2.val() keys:", Object.keys(val2 || {}).slice(0,20));
         const arr2 = Object.keys(val2).map(k => ({ id: k, ...val2[k] }));
         arr2.forEach(r => { r.createdAt = Number(r.createdAt || 0); });
         arr2.sort((a,b) => b.createdAt - a.createdAt);
+        console.debug(`[reviews] returning ${arr2.length} reviews from reviewsBySlug/${slug}`);
+        console.groupEnd();
         return arr2;
+      } else {
+        console.debug(`[reviews] no data at reviewsBySlug/${slug}`);
       }
+    } else {
+      console.debug("[reviews] slug empty, skipping reviewsBySlug");
     }
 
-    // 3) si no hay nada:
-    console.debug("[reviews] no hay reseñas en ninguna ruta para:", productKey, "slug:", slug);
+    console.debug("[reviews] no reviews found for productKey or slug");
+    console.groupEnd();
     return [];
   } catch (error) {
-    // si hay error de permisos/firebase lo vemos en consola
     console.error("[reviews] error leyendo reseñas:", error);
+    console.groupEnd();
     return [];
   }
 }
@@ -143,11 +168,14 @@ function renderStars(n) {
 
 // montaje DOM principal
 export async function mountProductPage() {
+  console.groupCollapsed("[product-page] mount start");
   try {
     const params = new URLSearchParams(location.search);
     const pk = params.get("pk");
+    console.debug("[product-page] URL param pk:", pk);
     if (!pk) {
       container.innerHTML = `<div style="padding:28px;text-align:center;color:#f88">Producto no especificado (pk faltante en URL).</div>`;
+      console.groupEnd();
       return;
     }
 
@@ -175,6 +203,7 @@ export async function mountProductPage() {
 
     // resolver producto
     const product = await resolveProduct(pk);
+    console.debug("[product-page] resolved product:", { productKey: product.productKey, name: product.name, row: product.row, sheetKey: product.sheetKey });
 
     // render imagen grande
     const left = document.getElementById("pp-left");
@@ -199,9 +228,11 @@ export async function mountProductPage() {
     reviewsList.innerHTML = `<div class="no-reviews">Cargando reseñas...</div>`;
 
     // log para depuración
-    console.debug("[product-page] productKey:", product.productKey, "productName:", product.name);
+    console.debug("[product-page] requesting reviews for:", product.productKey, product.name);
 
     const reviews = await loadReviews(product.productKey, product.name);
+
+    console.debug("[product-page] reviews length:", reviews.length);
 
     if (!reviews || !reviews.length) {
       reviewsList.innerHTML = `<div class="no-reviews">Aún no hay reseñas para este producto.</div>`;
@@ -222,31 +253,49 @@ export async function mountProductPage() {
         reviewsList.appendChild(entry);
       });
     }
+
+    console.groupEnd(); // product-page mount end
   } catch (err) {
     console.error("mountProductPage error", err);
     container.innerHTML = `<div style="padding:28px;text-align:center;color:#f88">Error cargando producto: ${escapeHtml(String(err && err.message || err))}</div>`;
+    console.groupEnd();
   }
 }
 
 // helpers que ya existían
 async function resolveProduct(pk) {
+  console.groupCollapsed("[resolveProduct] start for pk:", pk);
   const parsed = parsePK(pk);
-  if (!parsed) throw new Error("product key inválido");
+  if (!parsed) {
+    console.error("[resolveProduct] product key inválido:", pk);
+    console.groupEnd();
+    throw new Error("product key inválido");
+  }
   const { sheetKey, row } = parsed;
+  console.debug("[resolveProduct] parsed:", { sheetKey, row });
 
   // intentar cache local
   const cache = lastProductsCache || [];
   let p = cache.find(x => String(x.sheetKey) === String(sheetKey) && String(x.row) === String(row));
-  if (p) return normalizeProductEntry(p, sheetKey);
+  if (p) {
+    console.debug("[resolveProduct] found in local cache:", p);
+    console.groupEnd();
+    return normalizeProductEntry(p, sheetKey);
+  }
 
   // si no está en cache, pedir al API
+  console.debug("[resolveProduct] not in cache, fetching from API...");
   const remote = await fetchProductFromAPI(sheetKey, row);
   if (remote) {
     const normalized = { row: remote.row, sheetKey: remote.sheetKey || sheetKey, data: remote.data || {} };
     setLastProductsCache([...(lastProductsCache || []), normalized]);
+    console.debug("[resolveProduct] fetched and cached remote product:", normalized);
+    console.groupEnd();
     return normalizeProductEntry(remote, sheetKey);
   }
 
+  console.error("[resolveProduct] Producto no encontrado ni en cache ni en API:", { sheetKey, row });
+  console.groupEnd();
   throw new Error("Producto no encontrado");
 }
 
