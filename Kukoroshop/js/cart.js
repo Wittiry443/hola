@@ -783,6 +783,7 @@ if (cartPopupOverlay)
   4) createOrderInDB (optional)
   5) open wa.me
 */
+// Reemplaza la función sendToWhatsApp existente por esta versión
 export async function sendToWhatsApp() {
   const items = getCartItems();
   if (!items.length) {
@@ -790,21 +791,30 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // 1) must be logged in
+  // 1) debe estar logueado
   if (!auth || !auth.currentUser) {
     alert("Necesitas iniciar sesión para enviar el pedido. Por favor inicia sesión e inténtalo de nuevo.");
     return;
   }
 
-  // 2) show shipping modal and require fields
+  // Abrimos una ventana/pestaña en blanco inmediatamente para evitar popup blocker
+  let waWindow = null;
+  try {
+    waWindow = window.open('about:blank', '_blank');
+  } catch (e) {
+    waWindow = null;
+  }
+
+  // 2) pedimos shipping; si el usuario cancela (click fuera o cancelar) resolvemos null y abortamos
   const shipping = await showShippingModal();
   if (!shipping) {
-    // user cancelled or clicked outside -> abort
+    // si abrimos la ventana, cerrarla o mostrar aviso
+    if (waWindow && !waWindow.closed) waWindow.close();
     alert("Pedido cancelado.");
     return;
   }
 
-  // 3) try reserve stock on server
+  // 3) intentar reservar stock en servidor
   let result = { successes: [], failures: [] };
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -828,15 +838,14 @@ export async function sendToWhatsApp() {
     : items;
 
   if (failures.length && !paidItems.length) {
+    if (waWindow && !waWindow.closed) waWindow.close();
     alert("No fue posible reservar stock para ninguno de los items. Pedido cancelado.");
-    // rollback not needed because we didn't change DB if no successes
     return;
   }
 
-  // 4) create order in DB for reserved items (paidItems)
-  let createRes = null;
+  // 4) crear orden en DB (opcional)
   try {
-    createRes = await createOrderFromItems(paidItems, shipping || null);
+    const createRes = await createOrderFromItems(paidItems, shipping || null);
     if (!createRes || !createRes.ok) {
       _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
     }
@@ -844,7 +853,7 @@ export async function sendToWhatsApp() {
     _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
   }
 
-  // 5) build whatsapp message and open
+  // 5) construir URL de whatsapp
   let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
   let total = 0;
   paidItems.forEach(p => {
@@ -865,8 +874,37 @@ export async function sendToWhatsApp() {
 
   const phone = "573207378992";
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank");
 
+  // Si la ventana ya fue creada, redirigirla; si no, intentar abrir ahora o mostrar la URL para copiar
+  try {
+    if (waWindow && !waWindow.closed) {
+      waWindow.location = url;
+      waWindow.focus();
+    } else {
+      // Intentamos abrir ahora (esto puede ser bloqueado)
+      const w = window.open(url, "_blank");
+      if (!w) {
+        // popup bloqueado: mostramos la URL en un prompt para que el usuario la copie/abra
+        const ok = confirm("No se pudo abrir WhatsApp automáticamente (bloqueador de ventanas). ¿Quieres copiar la URL del pedido para abrirla manualmente?");
+        if (ok) {
+          try { await navigator.clipboard.writeText(url); alert("URL copiada al portapapeles. Pégala en tu navegador."); } catch(e) { prompt("Copia esta URL y pégala en tu navegador:", url); }
+        }
+      }
+    }
+  } catch (e) {
+    // en caso de cualquier excepción, fallback a open o prompt
+    try {
+      const w2 = window.open(url, "_blank");
+      if (!w2) {
+        try { await navigator.clipboard.writeText(url); alert("URL copiada al portapapeles. Pégala en tu navegador."); } catch(e) { prompt("Copia esta URL y pégala en tu navegador:", url); }
+      }
+    } catch (ee) {
+      if (waWindow && !waWindow.closed) waWindow.close();
+      prompt("Copia esta URL y pégala en tu navegador:", url);
+    }
+  }
+
+  // limpieza y UI
   try { saveCart(); } catch (e) {}
   try { updateCartUI(); } catch (e) {}
   try { refreshAllCardDisplays(); } catch (e) {}
@@ -878,6 +916,7 @@ export async function sendToWhatsApp() {
   Replaces previous flow: show card modal (shipping + card), validate, then reserve/persist/order.
   openYourPaymentModal remains an integration point (can be swapped). For now we capture card data and pass to openYourPaymentModal.
 */
+// Reemplaza window._openCardPaymentModal por esta versión
 window._openCardPaymentModal = async function() {
   const items = getCartItems();
   if (!items || items.length === 0) {
@@ -930,7 +969,7 @@ window._openCardPaymentModal = async function() {
     _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
   }
 
-  // call integration gate (openYourPaymentModal) with payment payload (implement this to integrate real gateway)
+  // call integration gate (openYourPaymentModal) with payment payload
   const total = updateCartUI();
   let paymentMeta = null;
   try {
@@ -947,7 +986,7 @@ window._openCardPaymentModal = async function() {
   }
 
   if (paymentMeta && paymentMeta.success) {
-    // mark order paid if possible
+    // mark order paid if possible (same logic que tenías)
     if (!firebaseKey) {
       try {
         const createResAfter = await createOrderFromItems(paidItems, shipping || null);
@@ -1031,4 +1070,5 @@ window.__wyvern_createOrderFromItems = async (items) => {
 window.__wyvern_retryPending = async () => {
   return await _retryPendingOrderIfAny();
 };
+
 
