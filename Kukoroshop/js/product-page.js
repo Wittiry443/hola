@@ -7,7 +7,6 @@ import { ref, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-dat
 
 const container = document.getElementById("product-page-root") || document.body;
 
-// estilos (si tu css ya cubre todo, puedes eliminar esto)
 (function injectStyles() {
   if (document.getElementById("product-page-styles")) return;
   const s = document.createElement("style");
