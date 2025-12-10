@@ -1,4 +1,3 @@
-// js/carousel.js
 import { makeImgEl, escapeHtml, fmtPrice } from "./utils.js";
 import { observeLazyImages } from "./utils.js";
 
@@ -115,3 +114,4 @@ function updateCarousel() {
 setInterval(() => {
   if (totalSlides > 1) moveCarousel(1);
 }, 5000);
+
