@@ -18,21 +18,20 @@ if (!tbody) {
   console.warn("reviews.js: no se encontró #reviews-table-body en el DOM. Asegúrate de tenerlo en admin.html");
 }
 
-// Creamos modal (si no existe) y estilos mínimos adaptados al admin theme
+// Crear modal + estilos (si no existe)
 (function createModalAndStyles() {
   if (document.getElementById("rv-modal-overlay")) return;
 
   const style = document.createElement("style");
   style.id = "rv-reviews-styles";
   style.textContent = `
-    /* small styles for reviews modal & table elements (complementarios a styles.css) */
     .rv-small { font-size:12px; color:#9ca3af; }
     .rv-stars { color:#fbbf24; font-size:18px; display:inline-block; }
     .rv-btn { padding:6px 10px; border-radius:8px; cursor:pointer; border:none }
     .rv-btn.edit { border:1px solid rgba(59,130,246,0.25); background:transparent; color:#93c5fd }
     .rv-btn.respond { background:linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff }
     .rv-btn.delete { background:#ef4444; color:#fff }
-    .rv-response { background:rgba(15,23,42,0.45); padding:8px; border-radius:8px; border:1px solid rgba(148,163,184,0.03); color:#d1d5db; }
+    .rv-response { background:rgba(15,23,42,0.45); padding:8px; border-radius:8px; border:1px solid rgba(148,163,184,0.03); color:#d1d5db; margin-top:8px }
     .rv-modal-overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); z-index:120000; padding:12px; }
     .rv-modal { width:100%; max-width:840px; background:#020617; border-radius:12px; padding:14px; border:1px solid rgba(148,163,184,0.06); color:#e5e7eb; box-shadow:0 20px 60px rgba(2,6,23,0.8); }
     .rv-field { width:100%; padding:8px; border-radius:8px; border:1px solid rgba(148,163,184,0.04); background:rgba(15,23,42,0.6); color:#e5e7eb; margin-top:8px; }
@@ -59,7 +58,6 @@ if (!tbody) {
     const ov = document.getElementById("rv-modal-overlay");
     if (ov) ov.style.display = "none";
   });
-  // click fuera cierra
   document.getElementById("rv-modal-overlay").addEventListener("click", (e) => {
     if (e.target.id === "rv-modal-overlay") e.currentTarget.style.display = "none";
   });
@@ -69,6 +67,7 @@ if (!tbody) {
 let flatList = []; // [{ productKey, id, data }]
 let currentUserIsAdmin = false;
 let currentAdminUid = null;
+let realtimeAttached = false; // evita múltiples onValue attach
 
 // utilidades
 const fmtDate = (ts) => {
@@ -95,10 +94,15 @@ function reviewRefPath(productKey, reviewId) {
 }
 
 // Cargar todas las reseñas (fusiona reviewsByProduct + reviewsBySlug)
+// IMPORTANTE: usamos variables locales y Map para evitar duplicados por condiciones de carrera
 async function loadAllReviews() {
   if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:18px">Cargando reseñas…</td></tr>`;
-  flatList = [];
+
+  // local collection — evita race conditions con llamadas concurrentes
+  const newList = [];
+  const seen = new Map(); // key -> true ; key = `${productKey}::${rid}`
+
   try {
     // reviewsByProduct
     const snap1 = await get(ref(db, "reviewsByProduct"));
@@ -107,10 +111,15 @@ async function loadAllReviews() {
       Object.keys(byProduct).forEach(productKey => {
         const reviews = byProduct[productKey] || {};
         Object.keys(reviews).forEach(rid => {
-          flatList.push({ productKey, id: rid, data: reviews[rid] });
+          const uniq = `${productKey}::${rid}`;
+          if (!seen.has(uniq)) {
+            seen.set(uniq, true);
+            newList.push({ productKey, id: rid, data: reviews[rid] });
+          }
         });
       });
     }
+
     // reviewsBySlug (prefixamos productKey con 'slug:')
     const snap2 = await get(ref(db, "reviewsBySlug"));
     if (snap2.exists()) {
@@ -118,13 +127,21 @@ async function loadAllReviews() {
       Object.keys(bySlug).forEach(slug => {
         const reviews = bySlug[slug] || {};
         Object.keys(reviews).forEach(rid => {
-          flatList.push({ productKey: `slug:${slug}`, id: rid, data: reviews[rid] });
+          const productKey = `slug:${slug}`;
+          const uniq = `${productKey}::${rid}`;
+          if (!seen.has(uniq)) {
+            seen.set(uniq, true);
+            newList.push({ productKey, id: rid, data: reviews[rid] });
+          }
         });
       });
     }
 
     // ordenar por createdAt desc
-    flatList.sort((a,b) => (Number(b.data?.createdAt || 0) - Number(a.data?.createdAt || 0)));
+    newList.sort((a,b) => (Number(b.data?.createdAt || 0) - Number(a.data?.createdAt || 0)));
+
+    // asignar al estado global sólo después de tener la lista definitiva
+    flatList = newList;
     renderTable(flatList);
   } catch (e) {
     console.error("reviews.loadAllReviews error", e);
@@ -133,6 +150,7 @@ async function loadAllReviews() {
 }
 
 // Render tabla en el tbody existente
+// Nota: la tabla en admin.html tiene 6 columnas: Producto (key), Usuario, Estrellas, Comentario, Fecha, Acciones
 function renderTable(list) {
   if (!tbody) return;
   if (!Array.isArray(list) || !list.length) {
@@ -152,15 +170,19 @@ function renderTable(list) {
     const created = fmtDate(r.createdAt || r.createdAt);
     const responseObj = r.response || null;
 
+    // Comentario: incluir también la respuesta admin (si existe) dentro de la misma celda para mantener 6 cols
+    let commentCellHtml = comment !== "" ? comment : `<span style="color:#9ca3af">Sin comentario</span>`;
+    if (responseObj) {
+      commentCellHtml += `<div class="rv-response"><strong>${sanitize(responseObj.by||"")}</strong><div style="margin-top:6px">${sanitize(responseObj.message||"")}</div><div class="rv-small" style="margin-top:6px">${fmtDate(responseObj.createdAt)}</div></div>`;
+    }
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="vertical-align:top;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${productKey}</td>
-      <td style="vertical-align:top">${productName || "<span style='color:#9ca3af'>Sin nombre</span>"}</td>
-      <td style="vertical-align:top">${starsHtml(stars)}</td>
-      <td style="vertical-align:top;max-width:360px;white-space:pre-wrap">${comment !== "" ? comment : "<span style='color:#9ca3af'>Sin comentario</span>"}</td>
       <td style="vertical-align:top">${user}</td>
+      <td style="vertical-align:top">${starsHtml(stars)}</td>
+      <td style="vertical-align:top;max-width:360px;white-space:pre-wrap">${commentCellHtml}</td>
       <td style="vertical-align:top">${created}</td>
-      <td style="vertical-align:top">${responseObj ? `<div class="rv-response"><strong>${sanitize(responseObj.by||"")}</strong><div style="margin-top:6px">${sanitize(responseObj.message||"")}</div><div class="rv-small" style="margin-top:6px">${fmtDate(responseObj.createdAt)}</div></div>` : `<span class="rv-small">Sin respuesta</span>`}</td>
       <td style="vertical-align:top">
         <div style="display:flex;flex-direction:column;gap:6px">
           <button class="rv-btn edit" data-product-key="${sanitize(item.productKey)}" data-review-id="${sanitize(item.id)}">✎ Editar</button>
@@ -170,7 +192,7 @@ function renderTable(list) {
       </td>
     `;
 
-    // Si usuario no admin ocultamos acciones (dejamos cell pero vacía para consistencia)
+    // Si usuario no admin ocultamos acciones
     if (!currentUserIsAdmin) {
       const actionsCell = tr.querySelector("td:last-child");
       actionsCell.innerHTML = `<span class="rv-small">Sin permisos</span>`;
@@ -305,9 +327,10 @@ if (tbody) {
   });
 }
 
-// Realtime: si admin, attach listeners para refrescar automáticamente
+// Realtime: si admin, attach listeners para refrescar automáticamente (sólo una vez)
 function attachRealtimeIfAdmin(uid) {
-  if (!uid) return;
+  if (!uid || realtimeAttached) return;
+  realtimeAttached = true;
   try {
     onValue(ref(db, "reviewsByProduct"), () => loadAllReviews(), (e) => console.warn("onValue reviewsByProduct err", e));
     onValue(ref(db, "reviewsBySlug"), () => loadAllReviews(), (e) => console.warn("onValue reviewsBySlug err", e));
@@ -333,8 +356,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) {
     currentUserIsAdmin = false;
     currentAdminUid = null;
-    // load reviews read-only if rules allow
-    await loadAllReviews();
+    await loadAllReviews(); // intentamos cargar en modo sólo lectura
     return;
   }
   currentAdminUid = user.uid;
