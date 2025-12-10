@@ -390,42 +390,44 @@ export async function openRefundModalFor(orderKey, product = {}) {
 export function attachCancelButtons(selector = ".btn-cancel-order") {
   const els = document.querySelectorAll(selector);
   els.forEach(el => {
-    el.addEventListener("click", (e) => {
-      const orderKey = el.dataset.orderKey || el.getAttribute("data-order-key");
-      const productKey = el.dataset.productKey || el.getAttribute("data-product-key");
-      const productName = el.dataset.productName || el.getAttribute("data-product-name");
-      const productQty = el.dataset.productQty || el.getAttribute("data-product-qty");
-      const productPrice = el.dataset.productPrice || el.getAttribute("data-product-price");
+    el.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
 
+      // Evita interferencias con botones de refund
+      if (el.classList.contains("btn-refund-order")) return;
+
+      const orderKey = el.dataset.orderKey;
       const productObj = {
-        productKey,
-        name: productName,
-        qty: productQty ? Number(productQty) : undefined,
-        price: productPrice ? Number(productPrice) : undefined
+        productKey: el.dataset.productKey,
+        name: el.dataset.productName,
+        qty: Number(el.dataset.productQty || 1),
+        price: Number(el.dataset.productPrice || 0)
       };
       openCancelModalFor(orderKey, productObj);
-    });
+    };
   });
 }
 
 export function attachRefundButtons(selector = ".btn-refund-order") {
   const els = document.querySelectorAll(selector);
   els.forEach(el => {
-    el.addEventListener("click", (e) => {
-      const orderKey = el.dataset.orderKey || el.getAttribute("data-order-key");
-      const productKey = el.dataset.productKey || el.getAttribute("data-product-key");
-      const productName = el.dataset.productName || el.getAttribute("data-product-name");
-      const productQty = el.dataset.productQty || el.getAttribute("data-product-qty");
-      const productPrice = el.dataset.productPrice || el.getAttribute("data-product-price");
+    el.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
 
+      // Evita interferencias con botones de cancel
+      if (el.classList.contains("btn-cancel-order")) return;
+
+      const orderKey = el.dataset.orderKey;
       const productObj = {
-        productKey,
-        name: productName,
-        qty: productQty ? Number(productQty) : undefined,
-        price: productPrice ? Number(productPrice) : undefined
+        productKey: el.dataset.productKey,
+        name: el.dataset.productName,
+        qty: Number(el.dataset.productQty || 1),
+        price: Number(el.dataset.productPrice || 0)
       };
       openRefundModalFor(orderKey, productObj);
-    });
+    };
   });
 }
 
