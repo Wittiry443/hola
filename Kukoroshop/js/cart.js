@@ -23,7 +23,7 @@ import {
 // IMPORTS FIREBASE: auth + crear orden + asegurar registro de usuario
 import { auth, createOrderInDB, ensureUserRecord } from "./firebase.js";
 
-/* ----------------- DOM nodes ----------------- */
+/* ----------------- NODOS DEL DOM ----------------- */
 const cartIconBtn = document.getElementById("cart-icon-btn");
 const cartPopupOverlay = document.getElementById("cart-popup-overlay");
 const cartPopup = document.getElementById("cart-popup");
@@ -31,7 +31,7 @@ const cartItemsContainer = document.getElementById("cart-items-container");
 const cartTotalEl = document.getElementById("cart-total");
 let cartActionsContainer = document.getElementById("cart-actions");
 
-/* ------------- Helpers de stock --------------- */
+/* ------------- UTILIDADES DE STOCK --------------- */
 export function getReservedQty(sheetKey, row) {
   return cart
     .filter(
@@ -113,7 +113,7 @@ export function refreshAllCardDisplays() {
     );
 }
 
-/* --------------- Carrito en memoria ------------- */
+/* --------------- CARRITO EN MEMORIA ------------- */
 export function getCartItems() {
   return cart;
 }
@@ -134,7 +134,7 @@ export function updateCartUI() {
   return total;
 }
 
-/* ---------- Añadir / eliminar / finalizar ---------- */
+/* ---------- AÑADIR / ELIMINAR / FINALIZAR ---------- */
 export async function addToCartFromCard(card, qty, cache = lastProductsCache, lastLoadedSheetKey) {
   const sheetKeyRaw = card.dataset.sheetKey || lastLoadedSheetKey || "UNKNOWN";
   const sheetKey = mapToAvailableSheetKey(sheetKeyRaw) || sheetKeyRaw;
@@ -254,7 +254,7 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
         const srv = await fetchServerStock(mapped, r.item.row);
         if (srv !== null) {
           applyNewStockToDOM(mapped, r.item.row, Number(srv), getReservedQty);
-          refreshCardStockDisplay(r.item.sheetKey, r.item.row, cache);
+          refreshCardStockDisplay(mapped, r.item.sheetKey, cache);
         }
       } catch (e) {}
     }
@@ -263,7 +263,7 @@ export async function finalizePurchaseOnServer(items, cache = lastProductsCache)
   return { successes, failures };
 }
 
-/* -------------- Pending order helpers ------------- */
+/* -------------- AYUDANTES PARA PEDIDOS PENDIENTES ------------- */
 function _savePendingOrderLocally(obj) {
   try {
     localStorage.setItem('wyvern_pending_order', JSON.stringify(obj));
@@ -300,12 +300,8 @@ window.addEventListener('load', () => {
   })();
 });
 
-/* -------------- Shipping modal (dark theme) -------------- */
-/*
-  showShippingModal() -> Promise that resolves to shipping object or null (if cancelled)
-  Required fields: fullName, phone, address (validated)
-  Clicking outside overlay cancels (resolves null)
-*/
+/* -------------- MODAL DE ENVÍO -------------- */
+
 function ensureShippingModalExists() {
   if (document.getElementById("shipping-modal-overlay")) return;
 
@@ -348,7 +344,7 @@ function ensureShippingModalExists() {
   `;
   document.body.appendChild(overlay);
 
-  // overlay click should hide and act as cancel (we won't resolve here — showShippingModal will handle)
+  // clic en overlay debe ocultar y actuar como cancelar (no resolveremos aquí — showShippingModal lo manejará)
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
       // visually hide; the promise will be resolved by showShippingModal via overlay.dataset.dismiss="true"
@@ -392,13 +388,12 @@ function showShippingModal(prefill = {}) {
       overlay.style.display = "none";
     }
 
-    // cancel handler
+    // handler de cancelar
     cancelBtn.onclick = () => {
       cleanup();
       resolve(null);
     };
 
-    // we need to detect overlay click -> we set dataset.dismiss in ensureShippingModalExists
     const observer = new MutationObserver(() => {
       if (overlay.dataset.dismiss === "true") {
         observer.disconnect();
@@ -415,8 +410,7 @@ function showShippingModal(prefill = {}) {
         address: addrInp.value.trim() || null,
         notes: notesInp.value.trim() || null
       };
-
-      // validate required fields: fullName, phone, address
+      
       if (!shipping.fullName || !shipping.phone || !shipping.address) {
         alert("Por favor completa Nombre, Teléfono y Dirección antes de continuar.");
         return;
@@ -435,11 +429,8 @@ function showShippingModal(prefill = {}) {
   });
 }
 
-/* -------------- Card payment modal (reuses shipping fields + card) -------------- */
-/*
-  showCardPaymentModal() -> Promise that resolves to { shipping, card: {number, expiry, cvc}} or null if canceled
-  expiry auto-formats MM/YY (inserts '/')
-*/
+/* -------------- MODAL DE PAGO CON TARJETA  -------------- */
+
 function ensureCardPaymentModalExists() {
   if (document.getElementById("card-payment-overlay")) return;
 
@@ -480,7 +471,6 @@ function ensureCardPaymentModalExists() {
   `;
   document.body.appendChild(overlay);
 
-  // overlay click -> hide and mark dismissed (showCardPaymentModal will detect)
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
       overlay.style.display = "none";
@@ -488,7 +478,6 @@ function ensureCardPaymentModalExists() {
     }
   });
 
-  // auto format expiry input (delegated in show function to ensure element exists)
 }
 
 function showCardPaymentModal(prefillShipping = {}) {
@@ -518,9 +507,8 @@ function showCardPaymentModal(prefillShipping = {}) {
   delete overlay.dataset.dismiss;
   overlay.style.display = "flex";
 
-  // expiry auto-format handler
   function formatExpiryOnInput(e) {
-    const v = e.target.value.replace(/\D/g,'').slice(0,4); // allow MMYY
+    const v = e.target.value.replace(/\D/g,'').slice(0,4); 
     let out = v;
     if (v.length >= 3) {
       out = v.slice(0,2) + '/' + v.slice(2);
@@ -559,12 +547,12 @@ function showCardPaymentModal(prefillShipping = {}) {
         address: addrInp.value.trim() || null,
         notes: notesInp.value.trim() || null
       };
-      // Validate required shipping fields
+      // Validar campos de envío requeridos
       if (!shipping.fullName || !shipping.phone || !shipping.address) {
         alert("Por favor completa Nombre, Teléfono y Dirección antes de continuar.");
         return;
       }
-      // Validate card fields
+      // Validar campos de la tarjeta
       const card = {
         number: (cardNumberInp.value || "").replace(/\s+/g,''),
         expiry: (expiryInp.value || ""),
@@ -573,14 +561,13 @@ function showCardPaymentModal(prefillShipping = {}) {
       if (!card.number || !card.expiry || !card.cvc) {
         alert("Por favor completa los datos de la tarjeta (número, fecha y CVC).");
         return;
-      }
-      // simple expiry format check MM/YY
+      } 
+      
       if (!/^\d{2}\/\d{2}$/.test(card.expiry)) {
         alert("Formato de fecha incorrecto. Usa MM/YY.");
         return;
       }
 
-      // Save shipping locally if desired
       try {
         localStorage.setItem("wyvern_last_shipping", JSON.stringify(shipping));
       } catch (e) {}
@@ -592,7 +579,7 @@ function showCardPaymentModal(prefillShipping = {}) {
   });
 }
 
-/* -------------- Helpers de orden -------------- */
+/* -------------- UTILIDADES -------------- */
 function _extractKey(res) {
   if (!res) return null;
   if (typeof res === "string") return res;
@@ -662,7 +649,7 @@ export async function createOrderFromItems(items, shipping = null) {
   }
 }
 
-/* --------------- POPUP del carrito --------------- */
+/* --------------- POPUP DEL CARRITO --------------- */
 export function openCartPopup() {
   if (!cartPopupOverlay) return;
 
@@ -774,20 +761,7 @@ if (cartPopupOverlay)
     if (e.target === cartPopupOverlay) closeCartPopup();
   });
 
-/* --------------- Enviar por WhatsApp --------------- */
-/*
-  Flow changed:
-  1) check user logged in -> if not, alert and abort
-  2) show shipping modal -> if null (cancel/overlay), abort without touching stock
-  3) finalizePurchaseOnServer (reserve stock)
-  4) createOrderInDB (optional)
-  5) open wa.me
-*/
-// Reemplaza la función sendToWhatsApp existente por esta versión
-// Reemplaza la función sendToWhatsApp existente por esta versión.
-// Nota: NO abre ventana antes; espera hasta que el usuario guarde y luego intenta abrir WhatsApp Web.
-// Si el navegador bloquea la apertura, copia la URL al portapapeles como fallback.
-// === SEND TO WHATSAPP COMPLETAMENTE FUNCIONAL ===
+/* --------------- ENVIAR POR WHATSAPP --------------- */
 export async function sendToWhatsApp() {
   const items = getCartItems();
   if (!items.length) {
@@ -820,10 +794,9 @@ export async function sendToWhatsApp() {
     ? result.successes.map(s => s.item)
     : items;
 
-  // Si no hubo fallas → flujo completo
   if (!failures.length) {
     try {
-      const shipping = await showShippingModal(); // aquí el usuario pone datos
+      const shipping = await showShippingModal(); 
       if (!shipping) {
         const confirmNoAddress = confirm("No ingresaste dirección. ¿Deseas continuar sin dirección?");
         if (!confirmNoAddress) return;
@@ -874,7 +847,7 @@ export async function sendToWhatsApp() {
       message += `\n`;
     }
 
-    // === REDIRECCIÓN REAL A WHATSAPP ===
+    // === REDIRECCIÓN A WHATSAPP ===
     const phone = "573207378992"; // vendedor
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
@@ -965,13 +938,7 @@ export async function sendToWhatsApp() {
   try { refreshAllCardDisplays(); } catch {}
   if (cart.length === 0) try { closeCartPopup(); } catch {}
 }
-/* --------------- Pago con tarjeta --------------- */
-/*
-  Replaces previous flow: show card modal (shipping + card), validate, then reserve/persist/order.
-  openYourPaymentModal remains an integration point (can be swapped). For now we capture card data and pass to openYourPaymentModal.
-*/
-// Reemplaza window._openCardPaymentModal por esta versión
-// Reemplaza la definición existente de window._openCardPaymentModal por esta
+/* --------------- PAGO CON TARJETA --------------- */
 window._openCardPaymentModal = async function() {
   const items = getCartItems();
   if (!items || items.length === 0) {
@@ -979,13 +946,13 @@ window._openCardPaymentModal = async function() {
     return;
   }
 
-  // must be logged in
+  // debe estar autenticado
   if (!auth || !auth.currentUser) {
     alert("Necesitas iniciar sesión para pagar con tarjeta. Por favor inicia sesión e inténtalo de nuevo.");
     return;
   }
 
-  // show card payment modal (shipping + card)
+  // mostrar modal de pago con tarjeta (envío + tarjeta)
   const cardResult = await showCardPaymentModal();
   if (!cardResult) {
     alert("Pago cancelado.");
@@ -994,7 +961,7 @@ window._openCardPaymentModal = async function() {
 
   const { shipping, card } = cardResult;
 
-  // Reserve stock (intenta decrementar en servidor)
+  // Reservar stock (intenta decrementar en servidor)
   let result;
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -1013,7 +980,7 @@ window._openCardPaymentModal = async function() {
     return;
   }
 
-  // create order in DB (best effort BEFORE payment to have an order record)
+  // crear orden en la BD 
   let firebaseKey = null;
   try {
     const createResNow = await createOrderFromItems(paidItems.length ? paidItems : items, shipping || null);
@@ -1027,7 +994,7 @@ window._openCardPaymentModal = async function() {
     _savePendingOrderLocally({ items: paidItems.length ? paidItems : items, shipping: shipping || null, createdAt: Date.now() });
   }
 
-  // call integration gate (openYourPaymentModal) with payment payload
+  // llamar al gateway de pago (openYourPaymentModal) con la carga de pago
   const total = updateCartUI();
   let paymentMeta = null;
   try {
@@ -1042,17 +1009,15 @@ window._openCardPaymentModal = async function() {
     alert("Error al procesar pago. Intenta de nuevo.");
     return;
   }
-
-  // Si pago exitoso -> guardar y marcar orden como pagada, y guardar pendientes si hace falta.
+  
   if (paymentMeta && paymentMeta.success) {
-    // Guardar shipping en localStorage (igual que sendToWhatsApp)
+    // Guardar shipping en localStorage 
     try {
       if (shipping && Object.keys(shipping).length) {
         localStorage.setItem("wyvern_last_shipping", JSON.stringify(shipping));
       }
     } catch (e) {}
 
-    // Asegurar la orden en DB y marcarla como pagada (si no existía / si existe)
     try {
       if (!firebaseKey) {
         const createResAfter = await createOrderFromItems(paidItems.length ? paidItems : items, shipping || null);
@@ -1060,7 +1025,7 @@ window._openCardPaymentModal = async function() {
           firebaseKey = createResAfter.firebaseKey;
           localStorage.removeItem('wyvern_pending_order');
         } else {
-          // guardar pendiente con paymentMeta para intentar marcarla como pagada luego
+          // guardar pendiente con paymentMeta 
           _savePendingOrderLocally({
             items: paidItems.length ? paidItems : items,
             paymentMeta,
@@ -1130,7 +1095,7 @@ window._openCardPaymentModal = async function() {
     return;
   }
 };
-/* --------------- Payment integration stub --------------- */
+/* --------------- STUB DE INTEGRACIÓN DE PAGO --------------- */
 window._onCardPaymentSuccess = async function(paymentMeta = {}) {
   try {
     const pendingRaw = localStorage.getItem('wyvern_pending_order');
@@ -1148,15 +1113,12 @@ window._markOrderAsPaid = async function(firebaseKey, paymentMeta) {
 };
 
 async function openYourPaymentModal(paymentPayload) {
-  // Implementa integración real con tu gateway.
-  // Por ahora simulamos un pago exitoso tras 1s (para testing).
-  // En producción, reemplaza por la implementación real.
   return new Promise((resolve) => {
     setTimeout(() => resolve({ success: true, provider: "mock", meta: {} }), 1000);
   });
 }
 
-/* --------------- Exports / helpers globales --------------- */
+/* --------------- EXPORTACIONES / UTILIDADES GLOBALES --------------- */
 window._removeFromCart = (idx) => removeFromCart(idx);
 window._sendToWhatsApp = () => sendToWhatsApp();
 
