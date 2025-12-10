@@ -1,6 +1,3 @@
-// js/products.js
-// Lógica de productos, categorías, render y búsqueda
-
 import { API_URL } from "./config.js";
 import {
   firstKeyValue,
@@ -441,3 +438,4 @@ export function searchProducts() {
 export function loadMore() {
   alert("La opción 'Ver más' aún no está implementada. 😅");
 }
+
