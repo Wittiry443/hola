@@ -1,6 +1,3 @@
-// js/main.js
-// ORIGINAL + buscador arreglado + admin habilitado
-
 import {
   loadCategories,
   searchProducts,
@@ -205,3 +202,4 @@ window.closeCartPopup = closeCartPopup;
 window.sendToWhatsApp = sendToWhatsApp;
 window.refreshAllCardDisplays = refreshAllCardDisplays;
 window._openCardPaymentModal = openCardPaymentModal;
+
