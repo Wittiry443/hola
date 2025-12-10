@@ -1,5 +1,3 @@
-// js/reviews.js
-// Admin reviews manager — integra con admin.html (tbody id="reviews-table-body")
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { escapeHtml } from "./utils.js";
 import {
