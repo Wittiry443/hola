@@ -971,6 +971,7 @@ export async function sendToWhatsApp() {
   openYourPaymentModal remains an integration point (can be swapped). For now we capture card data and pass to openYourPaymentModal.
 */
 // Reemplaza window._openCardPaymentModal por esta versión
+// Reemplaza la definición existente de window._openCardPaymentModal por esta
 window._openCardPaymentModal = async function() {
   const items = getCartItems();
   if (!items || items.length === 0) {
@@ -993,7 +994,7 @@ window._openCardPaymentModal = async function() {
 
   const { shipping, card } = cardResult;
 
-  // Reserve stock
+  // Reserve stock (intenta decrementar en servidor)
   let result;
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -1003,24 +1004,27 @@ window._openCardPaymentModal = async function() {
   }
 
   const failures = result.failures || [];
-  const paidItems = result.successes.length ? result.successes.map(s => s.item) : [];
+  const paidItems = result.successes && result.successes.length
+    ? result.successes.map(s => s.item)
+    : [];
 
   if (failures.length && !paidItems.length) {
     alert("No se pudo reservar stock para ninguno de los artículos. Pago cancelado.");
     return;
   }
 
-  // create order in DB
+  // create order in DB (best effort BEFORE payment to have an order record)
   let firebaseKey = null;
   try {
-    const createResNow = await createOrderFromItems(paidItems, shipping || null);
+    const createResNow = await createOrderFromItems(paidItems.length ? paidItems : items, shipping || null);
     if (createResNow && createResNow.ok) {
       firebaseKey = createResNow.firebaseKey;
     } else {
-      _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
+      // si no devuelve key, lo guardamos como pendiente (sin paymentMeta aún)
+      _savePendingOrderLocally({ items: paidItems.length ? paidItems : items, shipping: shipping || null, createdAt: Date.now() });
     }
   } catch (err) {
-    _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
+    _savePendingOrderLocally({ items: paidItems.length ? paidItems : items, shipping: shipping || null, createdAt: Date.now() });
   }
 
   // call integration gate (openYourPaymentModal) with payment payload
@@ -1029,9 +1033,9 @@ window._openCardPaymentModal = async function() {
   try {
     paymentMeta = await openYourPaymentModal({
       amount: total,
-      items: paidItems,
+      items: paidItems.length ? paidItems : items,
       orderKey: firebaseKey,
-      card, // captured card (in a real impl send to payment provider securely)
+      card, // en producción no enviar card raw a tu gateway desde el cliente
       shipping
     });
   } catch (err) {
@@ -1039,32 +1043,61 @@ window._openCardPaymentModal = async function() {
     return;
   }
 
+  // Si pago exitoso -> guardar y marcar orden como pagada, y guardar pendientes si hace falta.
   if (paymentMeta && paymentMeta.success) {
-    // mark order paid if possible (same logic que tenías)
-    if (!firebaseKey) {
-      try {
-        const createResAfter = await createOrderFromItems(paidItems, shipping || null);
+    // Guardar shipping en localStorage (igual que sendToWhatsApp)
+    try {
+      if (shipping && Object.keys(shipping).length) {
+        localStorage.setItem("wyvern_last_shipping", JSON.stringify(shipping));
+      }
+    } catch (e) {}
+
+    // Asegurar la orden en DB y marcarla como pagada (si no existía / si existe)
+    try {
+      if (!firebaseKey) {
+        const createResAfter = await createOrderFromItems(paidItems.length ? paidItems : items, shipping || null);
         if (createResAfter && createResAfter.ok) {
           firebaseKey = createResAfter.firebaseKey;
           localStorage.removeItem('wyvern_pending_order');
         } else {
-          _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now(), firebaseKey });
+          // guardar pendiente con paymentMeta para intentar marcarla como pagada luego
+          _savePendingOrderLocally({
+            items: paidItems.length ? paidItems : items,
+            paymentMeta,
+            shipping: shipping || null,
+            createdAt: Date.now(),
+            firebaseKey: createResAfter ? (createResAfter.firebaseKey || null) : null
+          });
         }
-      } catch (err) {
-        _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now(), firebaseKey });
-      }
-    } else {
-      try {
-        if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
-          await window._markOrderAsPaid(firebaseKey, paymentMeta);
+      } else {
+        try {
+          if (typeof window._markOrderAsPaid === "function" && firebaseKey) {
+            await window._markOrderAsPaid(firebaseKey, paymentMeta);
+          }
+          localStorage.removeItem('wyvern_pending_order');
+        } catch (err) {
+          // si falla, persistir pendiente con paymentMeta
+          _savePendingOrderLocally({
+            items: paidItems.length ? paidItems : items,
+            paymentMeta,
+            shipping: shipping || null,
+            createdAt: Date.now(),
+            firebaseKey
+          });
         }
-        localStorage.removeItem('wyvern_pending_order');
-      } catch (err) {
-        _savePendingOrderLocally({ items: paidItems, paymentMeta, shipping: shipping || null, createdAt: Date.now(), firebaseKey });
       }
+    } catch (err) {
+      // si ocurre cualquier excepción, guardar pendiente con paymentMeta
+      _savePendingOrderLocally({
+        items: paidItems.length ? paidItems : items,
+        paymentMeta,
+        shipping: shipping || null,
+        createdAt: Date.now(),
+        firebaseKey
+      });
     }
 
-    // remove reserved items from cart
+    // eliminar del carrito los items que se reservaron con éxito
     if (Array.isArray(result.successes) && result.successes.length > 0) {
       const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
       for (let i = cart.length - 1; i >= 0; i--) {
@@ -1072,21 +1105,31 @@ window._openCardPaymentModal = async function() {
         if (successKeys.includes(key)) cart.splice(i, 1);
       }
       setCart(cart);
+    } else {
+      // si no hay "successes" explícitas, pero pagamos, intentamos limpiar items pagados (paidItems)
+      if (paidItems.length) {
+        for (let i = cart.length - 1; i >= 0; i--) {
+          const key = `${cart[i].sheetKey}::${cart[i].row}`;
+          if (paidItems.find(pi => `${pi.sheetKey}::${pi.row}` === key)) cart.splice(i, 1);
+        }
+        setCart(cart);
+      }
     }
 
+    // guardar/actualizar UI y DOM
     try { await saveCart(); } catch (_) {}
     try { updateCartUI(); } catch (_) {}
     try { refreshAllCardDisplays(); } catch (_) {}
     try { closeCartPopup(); } catch (_) {}
 
-    alert("Pago procesado correctamente. ¡Gracias por tu compra!");
+    alert("Pago procesado correctamente. Los datos de la orden se guardaron (si hubo algún problema se creó un pendiente y se reintentará). ¡Gracias por tu compra!");
     return;
   } else {
+    // Pago fallido / cancelado -> no continuar. Si hubo reservas, avisar que contacte soporte.
     alert("Pago cancelado o fallido. Si ya se reservaron unidades contáctanos para soporte.");
     return;
   }
 };
-
 /* --------------- Payment integration stub --------------- */
 window._onCardPaymentSuccess = async function(paymentMeta = {}) {
   try {
@@ -1124,6 +1167,7 @@ window.__wyvern_createOrderFromItems = async (items) => {
 window.__wyvern_retryPending = async () => {
   return await _retryPendingOrderIfAny();
 };
+
 
 
 
