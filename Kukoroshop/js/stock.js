@@ -1,4 +1,3 @@
-// js/stock.js
 import { API_URL } from "./config.js";
 import {
   lastProductsCache,
@@ -249,4 +248,5 @@ export async function updateStockOnServer_set(sheetKeyRaw, row, newStock) {
   }
   return false;
 }
+
 
