@@ -1,4 +1,3 @@
-// js/pedidos.js
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { fmtPrice, escapeHtml } from "./utils.js";
 import {
