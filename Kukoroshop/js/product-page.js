@@ -1,15 +1,9 @@
-// js/product-page.js
 import { API_URL } from "./config.js";
 import { firstKeyValue, fmtPrice, makeImgEl, escapeHtml } from "./utils.js";
 import { lastProductsCache, setLastProductsCache } from "./state.js";
 import { mapToAvailableSheetKey } from "./stock.js";
 import { db } from "./firebase.js";
 import { ref, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
-
-/*
-  product.html?pk=<sheetKey>::<row>
-  pk preferiblemente igual al que genera products.js (sheetKey::row)
-*/
 
 const container = document.getElementById("product-page-root") || document.body;
 
