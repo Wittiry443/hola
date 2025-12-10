@@ -1,4 +1,3 @@
-// js/utils.js
 import { API_URL } from "./config.js";
 
 export function firstKeyValue(obj, keys) {
@@ -114,3 +113,4 @@ export function makeImgEl(url, alt, cls, eager = false) {
 
   return img;
 }
+
