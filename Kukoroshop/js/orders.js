@@ -117,8 +117,8 @@ let currentOrdersMap = {};
   // selector modal handlers
   const cpOverlay = document.getElementById("cp-overlay-selector");
   const cpClose = document.getElementById("cp-selector-close");
-  cpClose.onclick = () => { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; };
-  cpOverlay.onclick = (e) => { if (e.target.id === "cp-overlay-selector") { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; } };
+  cpClose.onclick = () => { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; document.documentElement.style.overflow = ""; };
+  cpOverlay.onclick = (e) => { if (e.target.id === "cp-overlay-selector") { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; document.documentElement.style.overflow = ""; } };
 })();
 
 // helpers de visibilidad
@@ -704,19 +704,16 @@ function openOrderCancelSelector(orderKey, order, mode = "cancel") {
         qty: it.qty,
         raw: it.raw
       };
-      // Abrir modal de cancel-product para ese producto
-      cancelModule.openCancelModalFor(orderKey, productObj);
-      // Si venimos en modo refund, activar la casilla dentro del modal (pequeño timeout)
-      if (mode === "refund") {
-        setTimeout(() => {
-          try {
-            const cb = document.getElementById("cp-refund-checkbox");
-            const evidenceArea = document.getElementById("cp-evidence-area");
-            if (cb) { cb.checked = true; }
-            if (evidenceArea) { evidenceArea.style.display = "block"; }
-          } catch (e) { /* ignore */ }
-        }, 160);
+
+      // Abrir modal correcto según modo: "refund" -> refund modal, else -> cancel modal
+      if (mode === "refund" && typeof cancelModule.openRefundModalFor === "function") {
+        cancelModule.openRefundModalFor(orderKey, productObj);
+      } else if (typeof cancelModule.openCancelModalFor === "function") {
+        cancelModule.openCancelModalFor(orderKey, productObj);
+      } else {
+        console.warn("Módulo de cancel-product no expone las funciones esperadas.");
       }
+
       // cerrar selector
       overlay.style.display = "none";
       overlay.setAttribute("aria-hidden", "true");
