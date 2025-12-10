@@ -34,6 +34,21 @@ const container = document.getElementById("product-page-root") || document.body;
     .review-comment{color:#d1d5db}
     .review-meta{font-size:12px;color:#9ca3af;margin-top:6px}
     .no-reviews{color:#9ca3af;padding:14px;text-align:center}
+
+    /* estilo para la respuesta del admin: debe verse distinto */
+    .review-response {
+      margin-top:10px;
+      padding:10px;
+      border-radius:8px;
+      background: linear-gradient(90deg, rgba(34,36,46,0.6), rgba(16,18,27,0.45));
+      border-left: 3px solid rgba(124,58,237,0.9);
+      color: #dbeafe;
+      font-size:13px;
+      line-height:1.4;
+    }
+    .review-response .resp-by { font-weight:700; color:#e9d5ff; margin-bottom:6px; }
+    .review-response .resp-date { font-size:12px; color:#9ca3af; margin-top:6px; }
+
     @media(max-width:900px){ .pp-wrap{flex-direction:column} .pp-left{order:0} .pp-right{order:1} }
   `;
   document.head.appendChild(s);
@@ -235,6 +250,22 @@ export async function mountProductPage() {
         const createdNum = Number(r.createdAt || r.timestamp || 0);
         const createdTxt = createdNum ? new Date(createdNum).toLocaleDateString() : "";
 
+        // build response block if exists
+        const resp = r.response || null;
+        let respHtml = "";
+        if (resp) {
+          const respMessage = (resp.message === "" || resp.message === null || resp.message === undefined) ? "<i style='color:#9ca3af'>Sin contenido</i>" : escapeHtml(resp.message);
+          const respBy = escapeHtml(resp.by || "Kukoro-support");
+          const respDate = resp.createdAt ? new Date(Number(resp.createdAt)).toLocaleDateString() : "";
+          respHtml = `
+            <div class="review-response" role="note" aria-label="Respuesta del equipo">
+              <div class="resp-by">Respuesta — ${respBy}</div>
+              <div class="resp-message">${respMessage}</div>
+              <div class="resp-date">${respDate ? escapeHtml(respDate) : ""}</div>
+            </div>
+          `;
+        }
+
         // render
         const entry = document.createElement("div");
         entry.className = "review-entry";
@@ -245,6 +276,7 @@ export async function mountProductPage() {
           </div>
           <div style="flex:1">
             <div class="review-comment">${commentHtml}</div>
+            ${respHtml}
           </div>
         `;
         reviewsList.appendChild(entry);
