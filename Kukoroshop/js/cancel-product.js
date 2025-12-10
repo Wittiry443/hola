@@ -1,9 +1,3 @@
-// js/cancel-product.js
-//a
-// Separado: cancel (cancelproduct/cancel) y refund (cancelproduct/refund)
-// Cada flujo tiene su propio modal y guardado en DB.
-// Requiere ./firebase.js que exporte `auth` y `db`.
-
 import { auth } from "./firebase.js";
 import { db } from "./firebase.js";
 import { ref as dbRef, push, set } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
@@ -19,7 +13,7 @@ const ROOT_NODE = "cancelproduct";
 const CANCEL_NODE = `${ROOT_NODE}/cancel`;
 const REFUND_NODE = `${ROOT_NODE}/refund`;
 
-// ----- Styles (single injection) -----
+// ----- Estilos (inyección única) -----
 (function injectStyles() {
   if (document.getElementById("cp-styles")) return;
   const s = document.createElement("style");
@@ -40,11 +34,10 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
   document.head.appendChild(s);
 })();
 
-// ----- Create two modals: cancel and refund -----
+// ----- Crear dos modales: cancel y refund -----
 (function createModals() {
   if (document.getElementById("cp-cancel-overlay")) return;
 
-  // Cancel modal (no reason required, minimal)
   const cancelHtml = `
     <div id="cp-cancel-overlay" class="cp-overlay" aria-hidden="true">
       <div class="cp-modal" role="dialog" aria-modal="true" aria-labelledby="cp-cancel-title">
@@ -71,7 +64,6 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
     </div>
   `;
 
-  // Refund modal (evidence upload)
   const refundHtml = `
     <div id="cp-refund-overlay" class="cp-overlay" aria-hidden="true">
       <div class="cp-modal" role="dialog" aria-modal="true" aria-labelledby="cp-refund-title">
@@ -107,7 +99,7 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
 
   document.body.insertAdjacentHTML("beforeend", cancelHtml + refundHtml);
 
-  // handlers for cancel modal
+  // manejadores del modal de cancelación
   const cancelOverlay = document.getElementById("cp-cancel-overlay");
   document.getElementById("cp-cancel-close").addEventListener("click", () => {
     closeCancelModal();
@@ -116,7 +108,7 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
     if (e.target === cancelOverlay) closeCancelModal();
   });
 
-  // handlers for refund modal
+  // manejadores del modal de reembolso
   const refundOverlay = document.getElementById("cp-refund-overlay");
   document.getElementById("cp-refund-close").addEventListener("click", () => {
     closeRefundModal();
@@ -125,7 +117,7 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
     if (e.target === refundOverlay) closeRefundModal();
   });
 
-  // file preview for refund
+  // vista previa de archivo para reembolso
   const refundFile = document.getElementById("cp-refund-file");
   const refundPreview = document.getElementById("cp-refund-preview");
   refundFile.addEventListener("change", () => {
@@ -137,7 +129,7 @@ const REFUND_NODE = `${ROOT_NODE}/refund`;
   });
 })();
 
-// ----- Helpers: open/close modals -----
+// ----- Helpers: abrir/cerrar modales -----
 function openCancelModalUI(orderKey, product) {
   const overlay = document.getElementById("cp-cancel-overlay");
   if (!overlay) return;
@@ -154,7 +146,6 @@ function openCancelModalUI(orderKey, product) {
   overlay.style.display = "flex";
   overlay.setAttribute("aria-hidden", "false");
 
-  // bind submit
   const submit = document.getElementById("cp-cancel-submit");
   submit.onclick = async () => {
     await submitCancel(orderKey, product);
@@ -166,7 +157,6 @@ function closeCancelModal() {
   if (!overlay) return;
   overlay.style.display = "none";
   overlay.setAttribute("aria-hidden", "true");
-  // clear
   document.getElementById("cp-cancel-qty").value = "";
   document.getElementById("cp-cancel-note").value = "";
   document.getElementById("cp-cancel-status").textContent = "";
@@ -194,7 +184,6 @@ function openRefundModalUI(orderKey, product) {
   overlay.style.display = "flex";
   overlay.setAttribute("aria-hidden", "false");
 
-  // bind submit
   const submit = document.getElementById("cp-refund-submit");
   submit.onclick = async () => {
     await submitRefund(orderKey, product);
@@ -215,11 +204,11 @@ function closeRefundModal() {
   document.getElementById("cp-refund-context").textContent = "";
 }
 
-// ----- Storage helper (try upload, fallback to base64) -----
+// ----- Helper de storage (intenta subir; si falla, devuelve base64) -----
 async function uploadEvidenceFile(file, uid) {
   if (!file) return { uploaded: false, reason: "no_file" };
   try {
-    const storage = getStorage(); // may throw if not initialized
+    const storage = getStorage();
     const ts = Date.now();
     const safeName = (file.name || `evidence_${ts}`).replace(/\s+/g, "_");
     const path = `${ROOT_NODE}/evidence/${uid}/${ts}_${safeName}`;
@@ -229,12 +218,12 @@ async function uploadEvidenceFile(file, uid) {
     const url = await getDownloadURL(sRef);
     return { uploaded: true, url, storagePath: path };
   } catch (err) {
-    console.warn("Storage upload failed, falling back to base64:", err);
+    console.warn("Error al subir a storage, intentando fallback base64:", err);
     try {
       const base64 = await readFileAsDataURL(file);
       return { uploaded: false, fallbackBase64: base64, reason: "storage_failed" };
     } catch (e2) {
-      console.error("Fallback base64 failed", e2);
+      console.error("Fallback base64 falló", e2);
       return { uploaded: false, reason: "both_failed" };
     }
   }
@@ -249,7 +238,7 @@ function readFileAsDataURL(file) {
   });
 }
 
-// ----- DB save helpers -----
+// ----- Helpers para guardar en la base de datos -----
 async function saveCancelEntry(payload) {
   const node = dbRef(db, CANCEL_NODE);
   const p = push(node);
@@ -263,7 +252,7 @@ async function saveRefundEntry(payload) {
   return p.key;
 }
 
-// ----- Submit handlers (separated flows) -----
+// ----- Handlers de envío (flujos separados) -----
 async function submitCancel(orderKey, product) {
   const statusEl = document.getElementById("cp-cancel-status");
   try {
@@ -286,7 +275,6 @@ async function submitCancel(orderKey, product) {
         raw: product.raw || product
       },
       orderKey: orderKey || "",
-      // NO reason required for cancel per request
       note,
       createdAt: Date.now()
     };
@@ -333,20 +321,16 @@ async function submitRefund(orderKey, product) {
       createdAt: Date.now()
     };
 
-    // Save a cancel record first (optional linking) — keep a cancel entry to track the cancellation itself
-    // If you don't want this, you can remove this block. I keep it to keep a cancel record in cancel node.
     let cancelKey = null;
     try {
       cancelKey = await saveCancelEntry({
         ...basePayload,
-        // mark that this cancel entry originated from refund request
         refundOrigin: true
       });
     } catch (e) {
-      console.warn("Could not save cancel entry before refund, continuing:", e);
+      console.warn("No se pudo guardar entrada de cancelación previa, continúo:", e);
     }
 
-    // upload evidence if provided
     let evidenceUrl = null;
     let evidenceBase64 = null;
     if (file) {
@@ -354,7 +338,7 @@ async function submitRefund(orderKey, product) {
       const uploadResult = await uploadEvidenceFile(file, user.uid);
       if (uploadResult.uploaded && uploadResult.url) evidenceUrl = uploadResult.url;
       else if (uploadResult.fallbackBase64) evidenceBase64 = uploadResult.fallbackBase64;
-      else console.warn("No evidence saved", uploadResult);
+      else console.warn("No se guardó evidencia", uploadResult);
     }
 
     const refundPayload = {
@@ -377,7 +361,7 @@ async function submitRefund(orderKey, product) {
   }
 }
 
-// ----- Public API: open functions and attach helpers -----
+// ----- API pública: funciones para abrir modales y adjuntar botones -----
 export async function openCancelModalFor(orderKey, product = {}) {
   openCancelModalUI(orderKey, product);
 }
@@ -386,7 +370,6 @@ export async function openRefundModalFor(orderKey, product = {}) {
   openRefundModalUI(orderKey, product);
 }
 
-// attach buttons by selector for convenience
 export function attachCancelButtons(selector = ".btn-cancel-order") {
   const els = document.querySelectorAll(selector);
   els.forEach(el => {
@@ -394,7 +377,6 @@ export function attachCancelButtons(selector = ".btn-cancel-order") {
       e.stopPropagation();
       e.preventDefault();
 
-      // Evita interferencias con botones de refund
       if (el.classList.contains("btn-refund-order")) return;
 
       const orderKey = el.dataset.orderKey;
@@ -416,7 +398,6 @@ export function attachRefundButtons(selector = ".btn-refund-order") {
       e.stopPropagation();
       e.preventDefault();
 
-      // Evita interferencias con botones de cancel
       if (el.classList.contains("btn-cancel-order")) return;
 
       const orderKey = el.dataset.orderKey;
@@ -431,7 +412,7 @@ export function attachRefundButtons(selector = ".btn-refund-order") {
   });
 }
 
-// default export convenience
+// exportación por defecto
 export default {
   openCancelModalFor,
   openRefundModalFor,
