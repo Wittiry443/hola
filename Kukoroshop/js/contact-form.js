@@ -1,6 +1,3 @@
-// js/contact-form.js
-
-// URL del backend real (CAMBIA esto cuando tus compas tengan la API lista)
 const CONTACT_API_URL = "https://tu-backend.com/api/contact";
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -70,3 +67,4 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
