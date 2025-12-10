@@ -1,4 +1,3 @@
-// js/admin-requests.js
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { escapeHtml, fmtPrice } from "./utils.js";
 import { ref, onValue, get, remove, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
@@ -6,7 +5,7 @@ import { ref, onValue, get, remove, update } from "https://www.gstatic.com/fireb
 // Elementos en admin.html
 const tbody = document.getElementById("refunds-table-body");
 
-// simple search/filter UI (creamos y colocamos encima de la tabla)
+// simple search/filter UI
 function ensureFiltersUI() {
   const panel = document.querySelector("#tab-refunds .admin-card-body");
   if (!panel) return;
@@ -37,7 +36,6 @@ function ensureFiltersUI() {
     const nestedTableWrapper = panel.querySelector(".table-wrapper");
 
     if (nestedTableWrapper) {
-      // buscamos el ancestro inmediato de esa tabla que sea hijo directo de panel
       let ancestor = nestedTableWrapper;
       while (ancestor && ancestor.parentNode !== panel) {
         ancestor = ancestor.parentNode;
@@ -45,16 +43,14 @@ function ensureFiltersUI() {
       if (ancestor && ancestor.parentNode === panel) {
         panel.insertBefore(wrapper, ancestor);
       } else {
-        // fallback: si no encontramos un ancestro que sea hijo directo, añadimos al final
         panel.appendChild(wrapper);
       }
     } else {
-      // si no hay ninguna .table-wrapper dentro del panel -> simplemente append
       panel.appendChild(wrapper);
     }
   }
 
-  // marca como añadido (solo después de insertar correctamente)
+  // marca como añadido
   panel._filtersAdded = true;
 
   // listeners del UI de filtros
@@ -70,8 +66,8 @@ function debounce(fn, wait=200){
 }
 
 // local caches
-let cancelsMap = {}; // id -> payload
-let refundsMap = {};  // id -> payload
+let cancelsMap = {};
+let refundsMap = {};  
 
 // ensure auth is admin
 async function isAdmin() {
@@ -160,11 +156,11 @@ function buildRows(filterType='all', q='') {
   return rows;
 }
 
-/* ------------------ Detail modal (inyectado) ------------------ */
+/* ------------------ Detail modal ------------------ */
 function ensureDetailModal() {
   if (document.getElementById("request-detail-modal")) return;
 
-  // css minimal para modal (puedes moverlo a styles.css si prefieres)
+  // css minimal para modal
   const css = `
   .rr-overlay { position:fixed; inset:0;background:rgba(0,0,0,0.45);display:none;align-items:center;justify-content:center;z-index:1200 }
   .rr-overlay[aria-hidden="false"] { display:flex; }
@@ -272,7 +268,6 @@ async function markAsProcessed(type, id) {
   try {
     // write status processed
     await update(ref(db, `cancelproduct/${type}/${id}`), { status: 'processed' });
-    // listeners en onValue recargarán la vista automáticamente
     return true;
   } catch (err) {
     console.error("markAsProcessed error", err);
@@ -288,8 +283,6 @@ function showDetailModal({ id, type, payload }) {
   const get = (k, def='—') => {
     try { const v = k(); return (v === undefined || v === null || v === '') ? def : v; } catch { return def; }
   };
-
-  // map status display: refunds should read "Reembolso" (si hay status lo mostramos junto)
   let status = get(()=> payload.status || '');
   if (type === 'refund') {
     status = status ? `Reembolso — ${status}` : 'Reembolso';
@@ -310,7 +303,7 @@ function showDetailModal({ id, type, payload }) {
   document.getElementById("rr-refundOrigin").innerText = String(payload.refundOrigin === true);
   document.getElementById("rr-refundRequested").innerText = String(payload.refundRequested === true);
 
-  // productos: intenta mostrar nombre y key y cantidad si existe
+  // productos:
   const productsList = document.getElementById("rr-products-list");
   productsList.innerHTML = '';
   if (payload.product) {
@@ -387,7 +380,7 @@ function renderMerged() {
 
   tbody.innerHTML = "";
   rows.forEach(r => {
-    // status display: prefijo para refunds y badge si processed
+    // status display:
     const rawStatus = r.raw && r.raw.status ? String(r.raw.status) : '';
     let statusDisplay = '';
     if (r.type === 'refund') {
@@ -396,7 +389,6 @@ function renderMerged() {
       statusDisplay = rawStatus || 'Cancelación';
     }
 
-    // badge for processed
     const processedBadge = rawStatus === 'processed' ? `<span class="badge-processed" style="margin-left:8px">Procesado</span>` : '';
 
     const tr = document.createElement("tr");
@@ -413,8 +405,6 @@ function renderMerged() {
     `;
     tbody.appendChild(tr);
   });
-
-  // attach click handlers (delegación pequeña)
   tbody.querySelectorAll(".btn-view").forEach(b => {
     b.onclick = (ev) => {
       ev.preventDefault();
@@ -443,15 +433,13 @@ function renderMerged() {
 }
 
 /* ------------------ Inicialización ------------------ */
-// initial load (after auth)
 async function loadAll() {
-  // sanity: verify admin
+  // verifica admin
   const ok = await isAdmin();
   if (!ok) {
     showEmpty("No eres admin o no tienes permisos para ver solicitudes.");
     return;
   }
-  // ensure listeners active
   attachListeners();
 }
 
@@ -462,6 +450,4 @@ onAuthStateChanged(auth, (user) => {
   }
   loadAll();
 });
-
-// export nothing
 export {};
