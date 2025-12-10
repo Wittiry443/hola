@@ -11,6 +11,7 @@ function ensureFiltersUI() {
   const panel = document.querySelector("#tab-refunds .admin-card-body");
   if (!panel) return;
   if (panel._filtersAdded) return;
+
   const wrapper = document.createElement("div");
   wrapper.style.display = "flex";
   wrapper.style.gap = "8px";
@@ -24,9 +25,39 @@ function ensureFiltersUI() {
     <input id="req-search-input" class="search-bar small" placeholder="Buscar por ID pedido / cliente / producto..." />
     <button id="req-refresh-btn" class="btn-small" style="margin-left:auto">Refrescar</button>
   `;
-  panel.insertBefore(wrapper, panel.querySelector(".table-wrapper"));
+
+  // Intentamos insertar antes de un .table-wrapper que sea hijo directo de panel
+  let directTableWrapper = panel.querySelector(":scope > .table-wrapper");
+
+  if (directTableWrapper) {
+    // caso ideal: la .table-wrapper es hijo directo -> insertar antes
+    panel.insertBefore(wrapper, directTableWrapper);
+  } else {
+    // la .table-wrapper puede estar anidada; buscamos la primera .table-wrapper en el subtree
+    const nestedTableWrapper = panel.querySelector(".table-wrapper");
+
+    if (nestedTableWrapper) {
+      // buscamos el ancestro inmediato de esa tabla que sea hijo directo de panel
+      let ancestor = nestedTableWrapper;
+      while (ancestor && ancestor.parentNode !== panel) {
+        ancestor = ancestor.parentNode;
+      }
+      if (ancestor && ancestor.parentNode === panel) {
+        panel.insertBefore(wrapper, ancestor);
+      } else {
+        // fallback: si no encontramos un ancestro que sea hijo directo, añadimos al final
+        panel.appendChild(wrapper);
+      }
+    } else {
+      // si no hay ninguna .table-wrapper dentro del panel -> simplemente append
+      panel.appendChild(wrapper);
+    }
+  }
+
+  // marca como añadido (solo después de insertar correctamente)
   panel._filtersAdded = true;
 
+  // listeners del UI de filtros
   document.getElementById("req-type-filter").addEventListener("change", renderMerged);
   document.getElementById("req-search-input").addEventListener("input", debounce(renderMerged, 220));
   document.getElementById("req-refresh-btn").addEventListener("click", () => { loadAll(); });
