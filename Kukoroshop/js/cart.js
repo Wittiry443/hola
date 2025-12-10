@@ -784,6 +784,9 @@ if (cartPopupOverlay)
   5) open wa.me
 */
 // Reemplaza la función sendToWhatsApp existente por esta versión
+// Reemplaza la función sendToWhatsApp existente por esta versión.
+// Nota: NO abre ventana antes; espera hasta que el usuario guarde y luego intenta abrir WhatsApp Web.
+// Si el navegador bloquea la apertura, copia la URL al portapapeles como fallback.
 export async function sendToWhatsApp() {
   const items = getCartItems();
   if (!items.length) {
@@ -791,30 +794,22 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // 1) debe estar logueado
+  // 1) require login
   if (!auth || !auth.currentUser) {
     alert("Necesitas iniciar sesión para enviar el pedido. Por favor inicia sesión e inténtalo de nuevo.");
     return;
   }
 
-  // Abrimos una ventana/pestaña en blanco inmediatamente para evitar popup blocker
-  let waWindow = null;
-  try {
-    waWindow = window.open('about:blank', '_blank');
-  } catch (e) {
-    waWindow = null;
-  }
-
-  // 2) pedimos shipping; si el usuario cancela (click fuera o cancelar) resolvemos null y abortamos
+  // 2) mostrar modal de shipping y esperar a que el usuario haga "Guardar y continuar".
+  //    showShippingModal() debe resolver con shipping object o null si cancela.
   const shipping = await showShippingModal();
   if (!shipping) {
-    // si abrimos la ventana, cerrarla o mostrar aviso
-    if (waWindow && !waWindow.closed) waWindow.close();
+    // el usuario canceló o hizo click fuera -> abortar completamente
     alert("Pedido cancelado.");
     return;
   }
 
-  // 3) intentar reservar stock en servidor
+  // 3) intentar reservar stock en el servidor
   let result = { successes: [], failures: [] };
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -822,6 +817,7 @@ export async function sendToWhatsApp() {
     result = { successes: [], failures: items.map(it => ({ item: it, reason: String(e) })) };
   }
 
+  // 4) si hubo reservas, quitar del carrito los elementos reservados
   if (Array.isArray(result.successes) && result.successes.length > 0) {
     const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
     for (let i = cart.length - 1; i >= 0; i--) {
@@ -832,18 +828,14 @@ export async function sendToWhatsApp() {
   }
 
   const failures = result.failures || [];
-  const failedItems = failures.map(f => f.item);
-  const paidItems = result.successes.length
-    ? result.successes.map(s => s.item)
-    : items;
+  const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
 
   if (failures.length && !paidItems.length) {
-    if (waWindow && !waWindow.closed) waWindow.close();
     alert("No fue posible reservar stock para ninguno de los items. Pedido cancelado.");
     return;
   }
 
-  // 4) crear orden en DB (opcional)
+  // 5) crear orden en DB (si aplica). Si falla, guardamos en local.
   try {
     const createRes = await createOrderFromItems(paidItems, shipping || null);
     if (!createRes || !createRes.ok) {
@@ -853,7 +845,7 @@ export async function sendToWhatsApp() {
     _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
   }
 
-  // 5) construir URL de whatsapp
+  // 6) construir mensaje y URL de WhatsApp Web
   let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
   let total = 0;
   paidItems.forEach(p => {
@@ -862,49 +854,49 @@ export async function sendToWhatsApp() {
     total += unit * Number(p.qty || 0);
   });
   message += `\nTotal: *$${total}*\n\n`;
-
-  if (shipping) {
-    message += `📦 *Datos de envío:*\n`;
-    if (shipping.fullName) message += `Nombre: ${shipping.fullName}\n`;
-    if (shipping.phone) message += `Tel: ${shipping.phone}\n`;
-    if (shipping.address) message += `Dirección: ${shipping.address}\n`;
-    if (shipping.notes) message += `Info: ${shipping.notes}\n`;
-    message += `\n`;
-  }
+  message += `📦 *Datos de envío:*\n`;
+  if (shipping.fullName) message += `Nombre: ${shipping.fullName}\n`;
+  if (shipping.phone) message += `Tel: ${shipping.phone}\n`;
+  if (shipping.address) message += `Dirección: ${shipping.address}\n`;
+  if (shipping.notes) message += `Info: ${shipping.notes}\n`;
 
   const phone = "573207378992";
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  const url = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
 
-  // Si la ventana ya fue creada, redirigirla; si no, intentar abrir ahora o mostrar la URL para copiar
+  // 7) intentar abrir WhatsApp Web AHORA (después de que el usuario guardó)
   try {
-    if (waWindow && !waWindow.closed) {
-      waWindow.location = url;
-      waWindow.focus();
+    const w = window.open(url, "_blank");
+    if (w) {
+      w.focus();
     } else {
-      // Intentamos abrir ahora (esto puede ser bloqueado)
-      const w = window.open(url, "_blank");
-      if (!w) {
-        // popup bloqueado: mostramos la URL en un prompt para que el usuario la copie/abra
-        const ok = confirm("No se pudo abrir WhatsApp automáticamente (bloqueador de ventanas). ¿Quieres copiar la URL del pedido para abrirla manualmente?");
-        if (ok) {
-          try { await navigator.clipboard.writeText(url); alert("URL copiada al portapapeles. Pégala en tu navegador."); } catch(e) { prompt("Copia esta URL y pégala en tu navegador:", url); }
+      // popup bloqueado -> fallback: copiar URL al portapapeles / mostrar prompt
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(url);
+          alert("El navegador bloqueó la apertura automática de WhatsApp. La URL del pedido fue copiada al portapapeles; pégala en tu navegador para abrir WhatsApp Web.");
+        } else {
+          // si no existe clipboard API, usar prompt
+          prompt("El navegador bloqueó la apertura automática. Copia esta URL y pégala en tu navegador:", url);
         }
+      } catch (err) {
+        prompt("No fue posible abrir WhatsApp automáticamente. Copia esta URL y pégala en tu navegador:", url);
       }
     }
   } catch (e) {
-    // en caso de cualquier excepción, fallback a open o prompt
+    // error inesperado -> fallback
     try {
-      const w2 = window.open(url, "_blank");
-      if (!w2) {
-        try { await navigator.clipboard.writeText(url); alert("URL copiada al portapapeles. Pégala en tu navegador."); } catch(e) { prompt("Copia esta URL y pégala en tu navegador:", url); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        alert("Ocurrió un error al abrir WhatsApp. La URL fue copiada al portapapeles.");
+      } else {
+        prompt("Ocurrió un error. Copia esta URL y pégala en tu navegador:", url);
       }
-    } catch (ee) {
-      if (waWindow && !waWindow.closed) waWindow.close();
+    } catch (_) {
       prompt("Copia esta URL y pégala en tu navegador:", url);
     }
   }
 
-  // limpieza y UI
+  // 8) limpieza y actualización UI
   try { saveCart(); } catch (e) {}
   try { updateCartUI(); } catch (e) {}
   try { refreshAllCardDisplays(); } catch (e) {}
@@ -1070,5 +1062,6 @@ window.__wyvern_createOrderFromItems = async (items) => {
 window.__wyvern_retryPending = async () => {
   return await _retryPendingOrderIfAny();
 };
+
 
 
