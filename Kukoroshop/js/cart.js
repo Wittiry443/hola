@@ -1,4 +1,3 @@
-// js/cart.js
 import {
   cart,
   setCart,
@@ -1129,3 +1128,4 @@ window.__wyvern_createOrderFromItems = async (items) => {
 window.__wyvern_retryPending = async () => {
   return await _retryPendingOrderIfAny();
 };
+
