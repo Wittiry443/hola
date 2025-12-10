@@ -1,5 +1,3 @@
-// js/admin.js (usa users/{uid}/orders como fuente única)
-
 import { auth, onAuthStateChanged, db, ensureUserRecord } from "./firebase.js";
 import { ADMIN_EMAILS } from "./auth.js";
 import { API_URL } from "./config.js";
@@ -21,7 +19,6 @@ const ORDER_STATUSES = ["pendiente", "en proceso", "enviado", "entregado", "canc
 let allProducts = [];
 let filteredProducts = [];
 
-// --- Helper: comprobar admin (claims -> /admins -> ADMIN_EMAILS)
 async function isAdminUser(user) {
   if (!user) return false;
   try {
@@ -29,32 +26,26 @@ async function isAdminUser(user) {
     const snap = await get(ref(db, `admins/${user.uid}`));
     if (snap.exists() && snap.val() === true) return true;
 
-    // 2) fallback: revisar users/{uid}.role == 'admin' (útil si migraste)
     const uSnap = await get(ref(db, `users/${user.uid}/role`));
     if (uSnap.exists() && String(uSnap.val()) === "admin") return true;
   } catch (e) {
     console.warn("isAdminUser error:", e);
   }
-
-  // 3) fallback UI-only: ADMIN_EMAILS (solo para mostrar UI, no para reglas)
+  
   if (ADMIN_EMAILS && ADMIN_EMAILS.includes(user.email)) return true;
 
   return false;
 }
-
-// onAuthStateChanged: comprobar y guardar user record (usa ensureUserRecord)
 onAuthStateChanged(auth, async (user) => {
   const label = document.getElementById("admin-user-label");
   if (!user) return (window.location.href = "index.html");
-
-  // Guardar/actualizar registro base del usuario (client) - no crítico
   try {
     if (typeof ensureUserRecord === "function") await ensureUserRecord(user);
   } catch (e) {
     console.warn("ensureUserRecord fail", e);
   }
 
-  // comprobar admin real
+  // comprobar si el usuario es administrador
   const isAdmin = await isAdminUser(user);
   if (!isAdmin) {
     alert("No tienes permisos de administrador.");
@@ -65,7 +56,7 @@ onAuthStateChanged(auth, async (user) => {
   initAdminUI();
 });
 
-// UI Inicial
+// Inicializar UI
 function initAdminUI() {
   document.getElementById("admin-logout-btn").onclick = () => auth.signOut();
   document.getElementById("admin-back-btn").onclick = () => (window.location.href = "index.html");
@@ -80,7 +71,7 @@ function initAdminUI() {
   document.getElementById("product-category-filter").onchange = applyProductFilters;
 
   loadProducts();
-  generarDashboardPedidos(); // lee users/*/orders y arma la tabla de pedidos
+  generarDashboardPedidos();
 }
 
 // -----------------------------------------------------------
@@ -103,7 +94,7 @@ function generarDashboardPedidos() {
 
   const usersRef = ref(db, "users");
 
-  // Escuchar todos los usuarios (admins deberían tener permiso según las reglas)
+  // Escuchar todos los usuarios
   onValue(usersRef, (snapshot) => {
     const users = snapshot.val() || {};
     const flatOrders = {}; // key -> { order, uid }
@@ -162,28 +153,9 @@ function generarDashboardPedidos() {
         const resumen  = order.resumen || "Sin resumen";
         const estadoClass = estadoLower.replace(/\s+/g, "-");
 
-        const optionsHtml = ORDER_STATUSES.map(st => `
-          <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>
-        `).join("");
+        const optionsHtml = ORDER_STATUSES.map(st => `\n          <option value="${st}" ${st === estadoLower ? "selected" : ""}>${st}</option>\n        `).join("");
 
-        tbody.innerHTML += `
-<tr data-order-key="${escapeHtml(key)}" data-order-uid="${escapeHtml(uid)}">
-  <td>${escapeHtml(String(idPedido))}</td>
-  <td>${escapeHtml(String(cliente))}</td>
-  <td>${escapeHtml(String(resumen))}</td>
-  <td>$${Number(total || 0).toLocaleString()}</td>
-  <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>
-  <td>
-    <div class="order-actions">
-      <select class="order-status-select" data-order-key="${key}" data-order-uid="${uid}">
-        ${optionsHtml}
-      </select>
-      <button class="order-edit-btn" data-order-key="${key}" data-order-uid="${uid}" title="Editar pedido">✎</button>
-      <button class="order-delete-btn" data-order-key="${key}" data-order-uid="${uid}" title="Eliminar pedido">🗑</button>
-    </div>
-  </td>
-</tr>
-`;
+        tbody.innerHTML += `\n<tr data-order-key="${escapeHtml(key)}" data-order-uid="${escapeHtml(uid)}">\n  <td>${escapeHtml(String(idPedido))}</td>\n  <td>${escapeHtml(String(cliente))}</td>\n  <td>${escapeHtml(String(resumen))}</td>\n  <td>$${Number(total || 0).toLocaleString()}</td>\n  <td><span class="estado ${estadoClass}">${escapeHtml(estado)}</span></td>\n  <td>\n    <div class="order-actions">\n      <select class="order-status-select" data-order-key="${key}" data-order-uid="${uid}">\n        ${optionsHtml}\n      </select>\n      <button class="order-edit-btn" data-order-key="${key}" data-order-uid="${uid}" title="Editar pedido">✎</button>\n      <button class="order-delete-btn" data-order-key="${key}" data-order-uid="${uid}" title="Eliminar pedido">🗑</button>\n    </div>\n  </td>\n</tr>\n`;
       });
     }
 
@@ -191,7 +163,7 @@ function generarDashboardPedidos() {
     if (ventasMesEl) ventasMesEl.textContent = totalMes.toLocaleString();
     if (pedidosEl)   pedidosEl.textContent   = totalPedidos;
 
-    // Listeners para selects de estado (usamos uid para actualizar la copia correcta)
+    // Listeners para selects de estado
     tbody.querySelectorAll(".order-status-select").forEach(sel => {
       sel.onchange = async () => {
         const key = sel.dataset.orderKey;
@@ -202,7 +174,7 @@ function generarDashboardPedidos() {
       };
     });
 
-    // Edit buttons
+    // Botones de editar
     tbody.querySelectorAll(".order-edit-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
@@ -211,7 +183,7 @@ function generarDashboardPedidos() {
           const snap = await get(ref(db, `users/${uid}/orders/${key}`));
           const order = snap.val();
           if (!order) return alert("Pedido no encontrado.");
-          openEditOrderModal(uid, key, order); // openEditOrderModal as before — it handles updating users copy by uid if present
+          openEditOrderModal(uid, key, order);
         } catch (e) {
           console.error("Error cargando pedido para editar:", e);
           alert("No se pudo cargar el pedido. Revisa la consola.");
@@ -219,7 +191,7 @@ function generarDashboardPedidos() {
       };
     });
 
-    // Delete buttons
+    // Botones de eliminar
     tbody.querySelectorAll(".order-delete-btn").forEach(btn => {
       btn.onclick = async () => {
         const key = btn.dataset.orderKey;
@@ -232,45 +204,34 @@ function generarDashboardPedidos() {
 
   }, (error) => {
     console.error("Error leyendo users/*/orders:", error);
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" style="text-align:center;color:#f55">
-          Error cargando pedidos desde Firebase. ${error && error.message ? escapeHtml(error.message) : ""}
-        </td>
-      </tr>
-    `;
+    tbody.innerHTML = `\n      <tr>\n        <td colspan="6" style="text-align:center;color:#f55">\n          Error cargando pedidos desde Firebase. ${error && error.message ? escapeHtml(error.message) : ""}\n        </td>\n      </tr>\n    `;
   });
 }
 
-// Helper: actualizar estado en users/{uid}/orders/{orderKey}
+// Actualizar estado en users/{uid}/orders/{orderKey}
 async function updateOrderStatus_forUser(orderKey, uid, newStatus) {
   if (!uid) throw new Error("No UID provided for order");
   await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newStatus });
   console.log(`[admin] users/${uid}/orders/${orderKey} estado -> ${newStatus}`);
 }
 
-// Helper: eliminar en users/{uid}/orders/{orderKey}
+// Eliminar en users/{uid}/orders/{orderKey}
 async function deleteOrder_forUser(orderKey, uid) {
   if (!uid) throw new Error("No UID provided for order");
   await remove(ref(db, `users/${uid}/orders/${orderKey}`));
   console.log(`[admin] users/${uid}/orders/${orderKey} eliminado`);
 }
 
-// ----------------------------------------------------
-// Modal de edición de pedido (dinámico) - nuevo esquema shipping
-// ----------------------------------------------------
-
-// Reemplazado: ensureOrderEditModalExists + openEditOrderModal
+// Modal de edición de pedido (esquema shipping)
 function ensureOrderEditModalExists() {
   if (document.getElementById("order-edit-modal-overlay")) return;
 
-  // estilos inyectados (coherentes con styles.css)
   const sId = "order-edit-modal-styles";
   if (!document.getElementById(sId)) {
     const style = document.createElement("style");
     style.id = sId;
     style.innerHTML = `
-/* Order edit modal - estilo coherente con site (oscuro) */
+/* Estilos modal de edición */
 #order-edit-modal-overlay {
   position: fixed;
   inset: 0;
@@ -309,7 +270,6 @@ function ensureOrderEditModalExists() {
     document.head.appendChild(style);
   }
 
-  // crear overlay + modal
   const overlay = document.createElement("div");
   overlay.id = "order-edit-modal-overlay";
   overlay.innerHTML = `
@@ -324,15 +284,11 @@ function ensureOrderEditModalExists() {
   `;
   document.body.appendChild(overlay);
 
-  // handlers globales
   overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
 
-  // cancelar
   overlay.querySelector("#order-edit-cancel").addEventListener("click", () => {
     overlay.style.display = "none";
   });
-
-  // el botón guardar se le asigna dinámicamente en openEditOrderModal (para tener contexto uid/key)
 }
 
 function openEditOrderModal(uid, orderKey, order) {
@@ -365,7 +321,7 @@ function openEditOrderModal(uid, orderKey, order) {
 
   const optionsHtml = ORDER_STATUSES.map(st => `<option value="${st}" ${st === (order.estado || "pendiente") ? "selected" : ""}>${st}</option>`).join("");
 
-  // body content (limpio y legible)
+  // Contenido del modal
   body.innerHTML = `
     <div class="form-row">
       <div>
@@ -440,7 +396,7 @@ function openEditOrderModal(uid, orderKey, order) {
     try {
       // actualizar users/{uid}/orders/{orderKey}
       await update(ref(db, `users/${uid}/orders/${orderKey}`), { estado: newEstado, shipping: shippingObj });
-      // intentar actualizar copia legacy en /orders/{orderKey} si existe (no fatal)
+      // intentar actualizar copia en /orders/{orderKey} si existe (no fatal)
       try {
         const legacySnap = await get(ref(db, `orders/${orderKey}`));
         if (legacySnap.exists()) {
@@ -463,9 +419,7 @@ function openEditOrderModal(uid, orderKey, order) {
   freshSaveBtn.addEventListener("click", newSave);
 }
 
-// -----------------------------------------------------------
-// Cargar productos desde Sheets (sin cambios)
-// -----------------------------------------------------------
+// Cargar productos desde Sheets
 async function loadProducts() {
   const tbody = document.getElementById("product-table-body");
   if (!tbody) return;
@@ -490,9 +444,7 @@ async function loadProducts() {
   }
 }
 
-// -----------------------------------------------------------
-// Filtros + Tabla de productos (sin cambios)
-// -----------------------------------------------------------
+// Filtros + Tabla de productos
 function fillProductCategoryFilter() {
   const select = document.getElementById("product-category-filter");
   const cats = [...new Set(allProducts.map(p => p.sheetKey))];
@@ -548,9 +500,7 @@ function renderProductsTable() {
   });
 }
 
-//-----------------------------------------------------------
-// CREAR / EDITAR PRODUCTO (sin cambios)
-//-----------------------------------------------------------
+// CREAR / EDITAR PRODUCTO
 function openCreateProductModal() {
   document.getElementById("product-modal-title").textContent = "Nuevo producto";
   clearForm();
@@ -582,9 +532,7 @@ function clearForm() {
   document.querySelector("#product-form").reset();
 }
 
-//-----------------------------------------------------------
-// GUARDAR / ELIMINAR PRODUCTOS (sin cambios)
-//-----------------------------------------------------------
+// GUARDAR / ELIMINAR PRODUCTOS
 async function onSubmitProductForm(e) {
   e.preventDefault();
 
@@ -636,6 +584,5 @@ async function deleteProduct(prod) {
   }
 }
 
-//-----------------------------------------------------------
 // FIN
-//-----------------------------------------------------------
+// -----------------------------------------------------------
