@@ -135,13 +135,8 @@
         <div class="admin-card">
           <div class="admin-card-header"><h2>Cancelaciones / Reembolsos</h2></div>
           <div class="admin-card-body">
-            <p class="admin-hint">Aquí aparecerán los pedidos marcados para reembolso o cancelación. (Placeholder)</p>
-            <div class="table-wrapper">
-              <table class="admin-table">
-                <thead><tr><th>ID Pedido</th><th>Cliente</th><th>Razón</th><th>Monto</th><th>Estado</th><th>Acciones</th></tr></thead>
-                <tbody id="refunds-table-body"><tr><td colspan="6" style="text-align:center;color:#999;padding:18px">No hay solicitudes.</td></tr></tbody>
-              </table>
-            </div>
+            <!-- Aquí montará el módulo admin-requests -->
+            <div id="cancel-requests-root"></div>
           </div>
         </div>
       </section>
@@ -221,9 +216,9 @@
     })();
   </script>
 
-  <!-- admin logic (keeps original admin.js) -->
+  <!-- admin logic (keeps original admin.js, reviews.js, and admin-requests) -->
   <script type="module" src="js/admin.js"></script>
   <script type="module" src="js/reviews.js"></script>
+  <script type="module" src="js/admin-requests.js"></script>
 </body>
 </html>
-
