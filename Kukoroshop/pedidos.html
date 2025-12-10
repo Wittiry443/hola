@@ -6,7 +6,6 @@
   <title>Mis pedidos — Kukoro-shop</title>
 
   <link rel="stylesheet" href="styles.css" />
-  <script type="module" src="js/orders.js"></script>
 </head>
 
 <body>
@@ -18,7 +17,7 @@
 
       <div class="nav-right">
         <button id="back-to-shop-btn" class="login-btn">Volver a la tienda</button>
-        
+
         <span id="user-label" class="user-label"></span>
         <button id="cart-icon-btn" class="cart-icon">Carrito (0)</button>
         <button id="orders-btn" class="cart-icon">Mis pedidos</button>
@@ -59,9 +58,25 @@
       (location.href = "pedidos.html");
 
     // CAMBIO AQUÍ: Funcionalidad del nuevo botón
-    document.getElementById("back-to-shop-btn").onclick = () => 
+    document.getElementById("back-to-shop-btn").onclick = () =>
       (location.href = "index.html");
   </script>
+
+  <!-- --------------------------
+       Módulos JS (type="module")
+       Asegúrate de que las rutas y nombres de archivo
+       coincidan con los tuyos en /js/*.js
+       -------------------------- -->
+
+  <!-- Si tu archivo de cancelación es js/cancel-product.js -->
+  <script type="module" src="js/cancel-product.js"></script>
+
+  <!-- El script que maneja los pedidos (usa el módulo de cancel-product internamente).
+       Cambia a "js/pedidos.js" si tu archivo se llama así. -->
+  <script type="module" src="js/orders.js"></script>
+  <!-- o si tu fichero se llama `pedidos.js`:
+  <script type="module" src="js/pedidos.js"></script>
+  -->
+
 </body>
 </html>
-
