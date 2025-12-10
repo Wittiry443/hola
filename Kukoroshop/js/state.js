@@ -1,4 +1,3 @@
-// js/state.js
 import { CART_STORAGE_KEY } from "./config.js";
 
 export let lastProductsCache = [];
@@ -26,3 +25,4 @@ export function saveCart() {
 export function normalizeProductKey(sheetKey, row) {
   return `${String(sheetKey || "").trim().toLowerCase()}::${String(row)}`;
 }
+
