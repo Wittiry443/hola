@@ -787,6 +787,7 @@ if (cartPopupOverlay)
 // Reemplaza la función sendToWhatsApp existente por esta versión.
 // Nota: NO abre ventana antes; espera hasta que el usuario guarde y luego intenta abrir WhatsApp Web.
 // Si el navegador bloquea la apertura, copia la URL al portapapeles como fallback.
+// === SEND TO WHATSAPP COMPLETAMENTE FUNCIONAL ===
 export async function sendToWhatsApp() {
   const items = getCartItems();
   if (!items.length) {
@@ -794,22 +795,7 @@ export async function sendToWhatsApp() {
     return;
   }
 
-  // 1) require login
-  if (!auth || !auth.currentUser) {
-    alert("Necesitas iniciar sesión para enviar el pedido. Por favor inicia sesión e inténtalo de nuevo.");
-    return;
-  }
-
-  // 2) mostrar modal de shipping y esperar a que el usuario haga "Guardar y continuar".
-  //    showShippingModal() debe resolver con shipping object o null si cancela.
-  const shipping = await showShippingModal();
-  if (!shipping) {
-    // el usuario canceló o hizo click fuera -> abortar completamente
-    alert("Pedido cancelado.");
-    return;
-  }
-
-  // 3) intentar reservar stock en el servidor
+  // Reservar/actualizar stock y registrar items en el server
   let result = { successes: [], failures: [] };
   try {
     result = await finalizePurchaseOnServer(items, lastProductsCache);
@@ -817,92 +803,168 @@ export async function sendToWhatsApp() {
     result = { successes: [], failures: items.map(it => ({ item: it, reason: String(e) })) };
   }
 
-  // 4) si hubo reservas, quitar del carrito los elementos reservados
-  if (Array.isArray(result.successes) && result.successes.length > 0) {
+  // Limpiar del carrito los que sí se guardaron
+  if (result.successes.length) {
     const successKeys = result.successes.map(s => `${s.item.sheetKey}::${s.item.row}`);
+
     for (let i = cart.length - 1; i >= 0; i--) {
       const key = `${cart[i].sheetKey}::${cart[i].row}`;
       if (successKeys.includes(key)) cart.splice(i, 1);
     }
+
     setCart(cart);
   }
 
-  const failures = result.failures || [];
-  const paidItems = result.successes.length ? result.successes.map(s => s.item) : items;
+  const failures = result.failures ?? [];
+  const paidItems = result.successes.length
+    ? result.successes.map(s => s.item)
+    : items;
 
-  if (failures.length && !paidItems.length) {
-    alert("No fue posible reservar stock para ninguno de los items. Pedido cancelado.");
+  // Si no hubo fallas → flujo completo
+  if (!failures.length) {
+    try {
+      const shipping = await showShippingModal(); // aquí el usuario pone datos
+      if (!shipping) {
+        const confirmNoAddress = confirm("No ingresaste dirección. ¿Deseas continuar sin dirección?");
+        if (!confirmNoAddress) return;
+      }
+
+      const savedOrder = await createOrderFromItems(paidItems, shipping || null);
+      if (!savedOrder?.ok) {
+        _savePendingOrderLocally({
+          items: paidItems,
+          shipping: shipping || null,
+          createdAt: Date.now()
+        });
+      }
+
+    } catch (e) {
+      _savePendingOrderLocally({
+        items: paidItems,
+        createdAt: Date.now()
+      });
+    }
+
+    // Cargar datos de envío guardados
+    let shippingData = null;
+    try {
+      shippingData = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null");
+    } catch {
+      shippingData = null;
+    }
+
+    // === CONSTRUIR MENSAJE DE WHATSAPP ===
+    let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
+    let total = 0;
+
+    paidItems.forEach(p => {
+      const unit = Number(p._priceNum ?? parsePriceNumber(p.price));
+      message += `• ${p.qty} x ${p.name} - $${unit}\n`;
+      total += unit * p.qty;
+    });
+
+    message += `\nTotal: *$${total}*\n\n`;
+
+    if (shippingData) {
+      message += "📦 *Datos de envío:*\n";
+      if (shippingData.fullName) message += `Nombre: ${shippingData.fullName}\n`;
+      if (shippingData.phone) message += `Tel: ${shippingData.phone}\n`;
+      if (shippingData.address) message += `Dirección: ${shippingData.address}\n`;
+      if (shippingData.notes) message += `Info: ${shippingData.notes}\n`;
+      message += `\n`;
+    }
+
+    // === REDIRECCIÓN REAL A WHATSAPP ===
+    const phone = "573207378992"; // vendedor
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank");
+
+    try { saveCart(); } catch {}
+    try { updateCartUI(); } catch {}
+    try { refreshAllCardDisplays(); } catch {}
+    try { closeCartPopup(); } catch {}
+
     return;
   }
 
-  // 5) crear orden en DB (si aplica). Si falla, guardamos en local.
-  try {
-    const createRes = await createOrderFromItems(paidItems, shipping || null);
-    if (!createRes || !createRes.ok) {
-      _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
-    }
-  } catch (e) {
-    _savePendingOrderLocally({ items: paidItems, shipping: shipping || null, createdAt: Date.now() });
+  // Si hubo errores de stock
+  const confirmPartial = confirm(
+    `No fue posible actualizar el stock para ${failures.length} productos. ¿Enviar solo los productos disponibles por WhatsApp?`
+  );
+
+  if (!confirmPartial) {
+    await Promise.all(failures.map(f => {
+      const mapped = mapToAvailableSheetKey(f.item.sheetKey) || f.item.sheetKey;
+      return fetchServerStock(mapped, f.item.row)
+        .then(s => {
+          if (s !== null) applyNewStockToDOM(mapped, f.item.row, Number(s), getReservedQty);
+        }).catch(() => {});
+    }));
+    refreshAllCardDisplays();
+    return;
   }
 
-  // 6) construir mensaje y URL de WhatsApp Web
-  let message = "🛒 *Pedido desde Kukoro-shop*\n\n";
-  let total = 0;
-  paidItems.forEach(p => {
-    const unit = (p._priceNum !== undefined) ? Number(p._priceNum) : parsePriceNumber(p.price);
-    message += `• ${p.qty} x ${p.name} - $${unit}\n`;
-    total += unit * Number(p.qty || 0);
-  });
-  message += `\nTotal: *$${total}*\n\n`;
-  message += `📦 *Datos de envío:*\n`;
-  if (shipping.fullName) message += `Nombre: ${shipping.fullName}\n`;
-  if (shipping.phone) message += `Tel: ${shipping.phone}\n`;
-  if (shipping.address) message += `Dirección: ${shipping.address}\n`;
-  if (shipping.notes) message += `Info: ${shipping.notes}\n`;
-
-  const phone = "573207378992";
-  const url = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-
-  // 7) intentar abrir WhatsApp Web AHORA (después de que el usuario guardó)
-  try {
-    const w = window.open(url, "_blank");
-    if (w) {
-      w.focus();
-    } else {
-      // popup bloqueado -> fallback: copiar URL al portapapeles / mostrar prompt
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(url);
-          alert("El navegador bloqueó la apertura automática de WhatsApp. La URL del pedido fue copiada al portapapeles; pégala en tu navegador para abrir WhatsApp Web.");
-        } else {
-          // si no existe clipboard API, usar prompt
-          prompt("El navegador bloqueó la apertura automática. Copia esta URL y pégala en tu navegador:", url);
-        }
-      } catch (err) {
-        prompt("No fue posible abrir WhatsApp automáticamente. Copia esta URL y pégala en tu navegador:", url);
-      }
-    }
-  } catch (e) {
-    // error inesperado -> fallback
+  // Flujo por WhatsApp parcial
+  if (paidItems.length) {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(url);
-        alert("Ocurrió un error al abrir WhatsApp. La URL fue copiada al portapapeles.");
-      } else {
-        prompt("Ocurrió un error. Copia esta URL y pégala en tu navegador:", url);
+      const shipping = await showShippingModal();
+
+      const orderRes = await createOrderFromItems(paidItems, shipping || null);
+
+      if (!orderRes || !orderRes.ok) {
+        _savePendingOrderLocally({
+          items: paidItems,
+          shipping: shipping || null,
+          createdAt: Date.now()
+        });
       }
-    } catch (_) {
-      prompt("Copia esta URL y pégala en tu navegador:", url);
+
+      let shippingData = null;
+      try {
+        shippingData = JSON.parse(localStorage.getItem("wyvern_last_shipping") || "null");
+      } catch {
+        shippingData = null;
+      }
+
+      // Construir mensaje parcial
+      let message = "🛒 *Pedido desde Kukoro-shop* (parcial)\n\n";
+      let total = 0;
+
+      paidItems.forEach(p => {
+        const price = Number(p._priceNum ?? parsePriceNumber(p.price));
+        message += `• ${p.qty} x ${p.name} - $${price}\n`;
+        total += price * p.qty;
+      });
+
+      message += `\nTotal: *$${total}*\n\n`;
+
+      if (shippingData) {
+        message += "📦 *Datos de envío:*\n";
+        if (shippingData.fullName) message += `Nombre: ${shippingData.fullName}\n`;
+        if (shippingData.phone) message += `Tel: ${shippingData.phone}\n`;
+        if (shippingData.address) message += `Dirección: ${shippingData.address}\n`;
+        if (shippingData.notes) message += `Info: ${shippingData.notes}\n`;
+        message += `\n`;
+      }
+
+      // Redirección a WhatsApp
+      const phone = "573207378992";
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+      window.open(url, "_blank");
+
+    } catch (e) {
+      _savePendingOrderLocally({
+        items: paidItems,
+        createdAt: Date.now()
+      });
     }
   }
 
-  // 8) limpieza y actualización UI
-  try { saveCart(); } catch (e) {}
-  try { updateCartUI(); } catch (e) {}
-  try { refreshAllCardDisplays(); } catch (e) {}
-  try { closeCartPopup(); } catch (e) {}
+  try { saveCart(); } catch {}
+  try { updateCartUI(); } catch {}
+  try { refreshAllCardDisplays(); } catch {}
+  if (cart.length === 0) try { closeCartPopup(); } catch {}
 }
-
 /* --------------- Pago con tarjeta --------------- */
 /*
   Replaces previous flow: show card modal (shipping + card), validate, then reserve/persist/order.
@@ -1062,6 +1124,7 @@ window.__wyvern_createOrderFromItems = async (items) => {
 window.__wyvern_retryPending = async () => {
   return await _retryPendingOrderIfAny();
 };
+
 
 
 
