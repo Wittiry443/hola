@@ -1,7 +1,7 @@
 // js/admin-requests.js
 import { auth, onAuthStateChanged, db } from "./firebase.js";
 import { escapeHtml, fmtPrice } from "./utils.js";
-import { ref, onValue, get, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+import { ref, onValue, get, remove, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 // Elementos en admin.html
 const tbody = document.getElementById("refunds-table-body");
@@ -160,6 +160,222 @@ function buildRows(filterType='all', q='') {
   return rows;
 }
 
+/* ------------------ Detail modal (inyectado) ------------------ */
+function ensureDetailModal() {
+  if (document.getElementById("request-detail-modal")) return;
+
+  // css minimal para modal (puedes moverlo a styles.css si prefieres)
+  const css = `
+  .rr-overlay { position:fixed; inset:0;background:rgba(0,0,0,0.45);display:none;align-items:center;justify-content:center;z-index:1200 }
+  .rr-overlay[aria-hidden="false"] { display:flex; }
+  .rr-modal { background:var(--panel,#0b1220); color:var(--text,#e6eef8); width:min(820px,92%); border-radius:12px; box-shadow:0 12px 40px rgba(2,6,23,0.6); padding:18px; font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; }
+  .rr-modal h3 { margin:0 0 10px 0; font-size:20px; }
+  .rr-grid { display:grid; grid-template-columns: 1fr 240px; gap:12px; align-items:start; }
+  .rr-left { min-width:0; }
+  .rr-right { background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; font-size:13px; color:#cbd5e1; }
+  .rr-row { margin-bottom:8px; }
+  .rr-label { display:block; font-size:12px; color:#94a3b8; margin-bottom:4px; }
+  .rr-value { font-size:14px; word-wrap:break-word; }
+  .rr-note { white-space:pre-wrap; background:rgba(0,0,0,0.04); padding:8px; border-radius:6px; color:#e6eef8; }
+  .rr-product { border:1px solid rgba(255,255,255,0.03); padding:8px; border-radius:6px; margin-bottom:8px; }
+  .rr-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+  .rr-btn { padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:600; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; }
+  .rr-btn.rr-close { background:transparent; }
+  .rr-btn.rr-delete { background:#E53935; color:white; border:none; }
+  .rr-btn.rr-proc { background:#16a34a; color:white; border:none; }
+  .rr-meta { font-size:12px; color:#9aa6b6; }
+  .badge-processed { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; background:rgba(34,197,94,0.12); color:#22c55e; border:1px solid rgba(34,197,94,0.18); }
+  `;
+
+  const style = document.createElement("style");
+  style.id = "rr-modal-styles";
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  const overlay = document.createElement("div");
+  overlay.id = "request-detail-modal";
+  overlay.className = "rr-overlay";
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.innerHTML = `
+    <div class="rr-modal" role="dialog" aria-modal="true" aria-labelledby="rr-title">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 id="rr-title">Solicitud</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="rr-btn rr-close" id="rr-close-btn">Cerrar ✕</button>
+        </div>
+      </div>
+      <div class="rr-grid" style="margin-top:8px">
+        <div class="rr-left">
+          <div class="rr-row">
+            <div class="rr-label">Tipo</div>
+            <div class="rr-value" id="rr-type"></div>
+          </div>
+          <div class="rr-row">
+            <div class="rr-label">ID (nodo)</div>
+            <div class="rr-value" id="rr-id"></div>
+          </div>
+          <div class="rr-row">
+            <div class="rr-label">Pedido</div>
+            <div class="rr-value" id="rr-orderKey"></div>
+          </div>
+          <div class="rr-row">
+            <div class="rr-label">Usuario (email)</div>
+            <div class="rr-value" id="rr-userEmail"></div>
+          </div>
+          <div class="rr-row">
+            <div class="rr-label">Nota</div>
+            <div class="rr-note" id="rr-note">—</div>
+          </div>
+
+          <div class="rr-row" id="rr-products-wrap">
+            <div class="rr-label">Producto(s)</div>
+            <div id="rr-products-list"></div>
+          </div>
+
+        </div>
+
+        <aside class="rr-right">
+          <div class="rr-row">
+            <div class="rr-label">Importe</div>
+            <div class="rr-value" id="rr-amount">—</div>
+          </div>
+          <div class="rr-row">
+            <div class="rr-label">Estado</div>
+            <div class="rr-value" id="rr-status">—</div>
+          </div>
+          <div class="rr-row rr-meta" id="rr-meta-block">
+            <div>Creado: <span id="rr-created">—</span></div>
+            <div>refundOrigin: <span id="rr-refundOrigin">—</span></div>
+            <div>refundRequested: <span id="rr-refundRequested">—</span></div>
+          </div>
+          <div class="rr-actions">
+            <button class="rr-btn rr-proc" id="rr-proc-btn">Marcar como procesado</button>
+            <button class="rr-btn rr-delete" id="rr-delete-btn">Eliminar</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // eventos
+  document.getElementById("rr-close-btn").addEventListener("click", ()=> {
+    overlay.setAttribute("aria-hidden", "true");
+  });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.setAttribute("aria-hidden", "true");
+  });
+}
+
+async function markAsProcessed(type, id) {
+  try {
+    // write status processed
+    await update(ref(db, `cancelproduct/${type}/${id}`), { status: 'processed' });
+    // listeners en onValue recargarán la vista automáticamente
+    return true;
+  } catch (err) {
+    console.error("markAsProcessed error", err);
+    return false;
+  }
+}
+
+function showDetailModal({ id, type, payload }) {
+  ensureDetailModal();
+  const overlay = document.getElementById("request-detail-modal");
+  if (!overlay) return;
+
+  const get = (k, def='—') => {
+    try { const v = k(); return (v === undefined || v === null || v === '') ? def : v; } catch { return def; }
+  };
+
+  // map status display: refunds should read "Reembolso" (si hay status lo mostramos junto)
+  let status = get(()=> payload.status || '');
+  if (type === 'refund') {
+    status = status ? `Reembolso — ${status}` : 'Reembolso';
+  } else {
+    status = status || 'Cancelación';
+  }
+
+  // rellenar campos
+  document.getElementById("rr-type").innerText = type === 'refund' ? 'Reembolso' : 'Cancelación';
+  document.getElementById("rr-id").innerText = id;
+  document.getElementById("rr-orderKey").innerText = get(()=> payload.orderKey || payload.order || payload.order_id, '—');
+  document.getElementById("rr-userEmail").innerText = get(()=> (payload.user && payload.user.email) ? payload.user.email : (payload.userEmail), '—');
+  document.getElementById("rr-note").innerText = get(()=> payload.note, '—');
+  const amt = payload.amount || payload.price || (payload.product && payload.product.price);
+  document.getElementById("rr-amount").innerText = amt ? ('$' + (Number(amt)||0).toLocaleString()) : '—';
+  document.getElementById("rr-status").innerText = status;
+  document.getElementById("rr-created").innerText = payload.createdAt ? (new Date(Number(payload.createdAt)).toLocaleString()) : '—';
+  document.getElementById("rr-refundOrigin").innerText = String(payload.refundOrigin === true);
+  document.getElementById("rr-refundRequested").innerText = String(payload.refundRequested === true);
+
+  // productos: intenta mostrar nombre y key y cantidad si existe
+  const productsList = document.getElementById("rr-products-list");
+  productsList.innerHTML = '';
+  if (payload.product) {
+    if (Array.isArray(payload.product)) {
+      payload.product.forEach(pr => {
+        const el = document.createElement("div");
+        el.className = "rr-product";
+        el.innerHTML = `<div style="font-weight:700">${escapeHtml(String(pr.name || pr.key || '—'))}</div>
+                        <div style="font-size:13px;color:#9aa6b6">${escapeHtml(String(pr.key || ''))} ${pr.qty ? '· x'+pr.qty : ''}</div>
+                        <div style="margin-top:6px">${escapeHtml(String(pr.description || ''))}</div>`;
+        productsList.appendChild(el);
+      });
+    } else if (typeof payload.product === 'object') {
+      const pr = payload.product;
+      const el = document.createElement("div");
+      el.className = "rr-product";
+      el.innerHTML = `<div style="font-weight:700">${escapeHtml(String(pr.name || pr.key || '—'))}</div>
+                      <div style="font-size:13px;color:#9aa6b6">${escapeHtml(String(pr.key || ''))} ${pr.qty ? '· x'+pr.qty : ''}</div>
+                      <div style="margin-top:6px">${escapeHtml(String(pr.description || ''))}</div>`;
+      productsList.appendChild(el);
+    } else {
+      const el = document.createElement("div");
+      el.className = "rr-product";
+      el.textContent = String(payload.product);
+      productsList.appendChild(el);
+    }
+  } else if (payload.productName) {
+    const el = document.createElement("div");
+    el.className = "rr-product";
+    el.innerHTML = `<div style="font-weight:700">${escapeHtml(String(payload.productName))}</div>`;
+    productsList.appendChild(el);
+  } else {
+    productsList.innerHTML = '<div class="rr-meta">No hay detalles del producto</div>';
+  }
+
+  // delete button dentro del modal
+  const delBtn = document.getElementById("rr-delete-btn");
+  delBtn.onclick = async () => {
+    if (!confirm(`Eliminar solicitud ${type} ${id} de forma permanente?`)) return;
+    try {
+      await remove(ref(db, `cancelproduct/${type}/${id}`));
+      overlay.setAttribute("aria-hidden", "true");
+      alert("Solicitud eliminada.");
+    } catch (err) {
+      console.error("Error eliminando desde modal", err);
+      alert("No se pudo eliminar. Revisa la consola.");
+    }
+  };
+
+  const procBtn = document.getElementById("rr-proc-btn");
+  procBtn.onclick = async () => {
+    if (!confirm(`Marcar solicitud ${type} ${id} como procesada?`)) return;
+    const ok = await markAsProcessed(type, id);
+    if (ok) {
+      overlay.setAttribute("aria-hidden", "true");
+      alert("Solicitud marcada como procesada.");
+    } else {
+      alert("No se pudo marcar como procesada. Revisa la consola.");
+    }
+  };
+
+  overlay.setAttribute("aria-hidden", "false");
+}
+
+/* ------------------ Renderizado principal ------------------ */
 function renderMerged() {
   ensureFiltersUI();
   if (!tbody) return;
@@ -171,13 +387,25 @@ function renderMerged() {
 
   tbody.innerHTML = "";
   rows.forEach(r => {
+    // status display: prefijo para refunds y badge si processed
+    const rawStatus = r.raw && r.raw.status ? String(r.raw.status) : '';
+    let statusDisplay = '';
+    if (r.type === 'refund') {
+      statusDisplay = rawStatus ? `Reembolso — ${rawStatus}` : 'Reembolso';
+    } else {
+      statusDisplay = rawStatus || 'Cancelación';
+    }
+
+    // badge for processed
+    const processedBadge = rawStatus === 'processed' ? `<span class="badge-processed" style="margin-left:8px">Procesado</span>` : '';
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(String(r.orderKey || '—'))}</td>
       <td>${escapeHtml(String(r.userEmail || (r.raw && r.raw.user && r.raw.user.email) || '—'))}</td>
       <td style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(String(r.product || r.raw?.product?.key || '—'))}</td>
       <td>${r.amount ? ('$' + (Number(r.amount)||0).toLocaleString()) : '—'}</td>
-      <td>${escapeHtml(String(r.status || (r.type==='refund'?'reembolso':'cancelación')))}</td>
+      <td>${escapeHtml(String(statusDisplay))}${processedBadge}</td>
       <td style="white-space:nowrap">
         <button class="btn-small btn-view" data-type="${r.type}" data-id="${escapeHtml(r.id)}">Ver</button>
         <button class="btn-small btn-delete" style="background:#E53935;color:#fff" data-type="${r.type}" data-id="${escapeHtml(r.id)}">Eliminar</button>
@@ -193,8 +421,7 @@ function renderMerged() {
       const id = b.dataset.id;
       const type = b.dataset.type;
       const payload = (type === 'cancel') ? cancelsMap[id] : refundsMap[id];
-      // abrir modal simple con JSON (puedes mejorar UI)
-      alert(`Tipo: ${type}\nID: ${id}\n\n` + JSON.stringify(payload, null, 2));
+      showDetailModal({ id, type, payload });
     };
   });
 
@@ -215,6 +442,7 @@ function renderMerged() {
   });
 }
 
+/* ------------------ Inicialización ------------------ */
 // initial load (after auth)
 async function loadAll() {
   // sanity: verify admin
