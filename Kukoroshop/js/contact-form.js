@@ -1,5 +1,3 @@
-const CONTACT_API_URL = "https://tu-backend.com/api/contact";
-
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("contact-form");
   const statusEl = document.getElementById("contact-status");
@@ -67,4 +65,5 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
 
