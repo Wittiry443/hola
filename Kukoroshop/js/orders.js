@@ -8,6 +8,9 @@ import {
   set
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
+// importa el módulo de cancel-product (el que creamos antes)
+import cancelModule from "./cancel-product.js";
+
 // UI elements
 const loadingEl = document.getElementById("orders-loading");
 const listEl = document.getElementById("orders-list");
@@ -48,7 +51,16 @@ let currentOrdersMap = {};
 .review-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .review-note{font-size:12px;color:#9ca3af;margin-top:6px}
 .readonly-stars{color:#fff;opacity:0.95;font-size:18px}
-@media(max-width:640px){.invoice-modal,.review-box{max-width:95%}}
+
+/* Cancel/Refund product selector modal */
+.cp-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:110000;padding:12px}
+.cp-modal{width:100%;max-width:760px;background:#020617;border-radius:10px;padding:14px;border:1px solid rgba(148,163,184,0.06);color:#e5e7eb}
+.cp-item{padding:10px;border-radius:8px;background:rgba(15,23,42,0.55);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.cp-item .meta{font-size:14px;color:#cbd5e1}
+.cp-actions {display:flex;gap:8px}
+
+/* small responsive */
+@media(max-width:640px){.invoice-modal,.review-box,.cp-modal{max-width:95%}}
   `;
   document.head.appendChild(style);
 
@@ -79,6 +91,17 @@ let currentOrdersMap = {};
         </div>
       </div>
     </div>
+
+    <!-- selector para cancelar / solicitar reembolso por producto -->
+    <div id="cp-overlay-selector" class="cp-overlay" aria-hidden="true">
+      <div class="cp-modal" role="dialog" aria-modal="true" id="cp-modal-selector">
+        <h3 id="cp-selector-title" style="margin:0 0 8px 0">Selecciona el producto</h3>
+        <div id="cp-selector-body" style="max-height:60vh;overflow:auto"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <button id="cp-selector-close" class="btn-close-invoice" style="border:1px solid rgba(148,163,184,0.06);padding:6px 10px;border-radius:8px">Cerrar</button>
+        </div>
+      </div>
+    </div>
   `;
   document.body.insertAdjacentHTML("beforeend", html);
 
@@ -90,6 +113,12 @@ let currentOrdersMap = {};
   document.getElementById("close-review-btn").onclick = () => hideReview();
   document.getElementById("review-cancel-btn").onclick = () => hideReview();
   document.getElementById("review-overlay").onclick = (e) => { if (e.target.id === "review-overlay") hideReview(); };
+
+  // selector modal handlers
+  const cpOverlay = document.getElementById("cp-overlay-selector");
+  const cpClose = document.getElementById("cp-selector-close");
+  cpClose.onclick = () => { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; };
+  cpOverlay.onclick = (e) => { if (e.target.id === "cp-overlay-selector") { cpOverlay.style.display = "none"; cpOverlay.setAttribute("aria-hidden","true"); document.getElementById("cp-selector-body").innerHTML = ""; } };
 })();
 
 // helpers de visibilidad
@@ -137,8 +166,7 @@ function getProductKeyFromRaw(raw, name) {
   return slugify(name);
 }
 
-// DB helpers para reseñas
-// ahora se leen/escriben por UID: reviewsByProduct/{productKey}/{uid}
+// DB helpers para reseñas (modificados anteriormente)
 async function fetchExistingReview(productKey, uid) {
   if (!productKey || !uid) return null;
   try {
@@ -162,7 +190,6 @@ async function createReview(productKey, productName, stars, comment, orderKey = 
   const user = auth.currentUser;
   if (!user) throw new Error("not_authenticated");
 
-  // payload
   const payload = {
     productName: productName || "",
     stars: Number(stars || 0),
@@ -258,6 +285,25 @@ function renderOrdersObject(obj) {
       ? (isNaN(Number(order.createdAt)) ? String(order.createdAt) : new Date(Number(order.createdAt)).toLocaleString())
       : "—";
 
+    // determinar cuándo mostrar botones
+    // Mostrar "Cancelar" si estado es pendiente / en proceso
+    const cancelMatch = /pendiente|pend|en proceso|proceso|procesando|processing/i;
+    const showCancel = cancelMatch.test(estadoLower);
+    // Mostrar "Solicitar reembolso" si entregado
+    const showRefund = /entregado|entregad/i.test(estadoLower);
+
+    // Build actions HTML:
+    const cancelOrRefundBtnHtml = showCancel
+      ? `<button class="btn-cancel-order" data-order-key="${escapeHtml(String(key))}" style="padding:6px 10px;border-radius:6px;background:#ef4444;color:white;border:none;cursor:pointer;font-size:13px">🛑 Cancelar</button>`
+      : (showRefund
+          ? `<button class="btn-refund-order" data-order-key="${escapeHtml(String(key))}" style="padding:6px 10px;border-radius:6px;background:#f59e0b;color:#111;border:none;cursor:pointer;font-size:13px">💸 Solicitar reembolso</button>`
+          : ""
+        );
+
+    const reviewBtnHtml = (estadoLower === "entregado")
+      ? `<button class="btn-open-reviews" data-order-key="${escapeHtml(String(key))}" style="padding:6px 10px;border-radius:6px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;cursor:pointer;font-size:13px">✍️ Dejar reseña</button>`
+      : "";
+
     const article = document.createElement("article");
     article.className = "order-card";
     article.style.cssText = "border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);";
@@ -277,7 +323,8 @@ function renderOrdersObject(obj) {
       <div style="margin-top:10px;color:#cbd5e1;font-size:14px;">${escapeHtml(resumen)}</div>
       <div style="margin-top:12px;border-top:1px solid rgba(148,163,184,0.03);padding-top:8px;text-align:right;display:flex;gap:8px;justify-content:flex-end;align-items:center">
         <button class="btn-view-invoice" data-order-key="${escapeHtml(String(key))}" style="background-color:rgba(255,255,255,0.95);border:1px solid rgba(148,163,184,0.06);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:#111">📄 Ver Factura</button>
-        ${estadoLower === "entregado" ? `<button class="btn-open-reviews" data-order-key="${escapeHtml(String(key))}" style="padding:6px 10px;border-radius:6px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;cursor:pointer;font-size:13px">✍️ Dejar reseña</button>` : ""}
+        ${cancelOrRefundBtnHtml}
+        ${reviewBtnHtml}
       </div>
     `;
     frag.appendChild(article);
@@ -285,7 +332,7 @@ function renderOrdersObject(obj) {
 
   listEl.appendChild(frag);
 
-  // delegación de eventos: Ver Factura y Dejar reseña
+  // delegación de eventos: Ver Factura, Dejar reseña, Cancel/Refund
   listEl.onclick = (e) => {
     const viewBtn = e.target.closest ? e.target.closest(".btn-view-invoice") : null;
     if (viewBtn) {
@@ -305,6 +352,28 @@ function renderOrdersObject(obj) {
       const order = currentOrdersMap[orderKey];
       if (!order) return;
       openOrderReviewsModal(orderKey, order);
+      return;
+    }
+
+    const cancelBtn = e.target.closest ? e.target.closest(".btn-cancel-order") : null;
+    if (cancelBtn) {
+      const orderKey = cancelBtn.dataset.orderKey;
+      if (!orderKey) return;
+      const order = currentOrdersMap[orderKey];
+      if (!order) return;
+      // abrir selector de productos en modo "cancel"
+      openOrderCancelSelector(orderKey, order, "cancel");
+      return;
+    }
+
+    const refundBtn = e.target.closest ? e.target.closest(".btn-refund-order") : null;
+    if (refundBtn) {
+      const orderKey = refundBtn.dataset.orderKey;
+      if (!orderKey) return;
+      const order = currentOrdersMap[orderKey];
+      if (!order) return;
+      // abrir selector de productos en modo "refund"
+      openOrderCancelSelector(orderKey, order, "refund");
       return;
     }
   };
@@ -441,7 +510,6 @@ function renderError(err, userCtx = null) {
 
   if (listEl) listEl.innerHTML = `<div style="padding:18px;color:#f97373;text-align:center">No se pudieron cargar tus pedidos: ${msg}${userInfoHtml}</div>`;
 }
-
 /* =========================
    Modal de reseñas por pedido
    - muestra cada producto del pedido
@@ -584,7 +652,81 @@ async function openOrderReviewsModal(orderKey, order) {
   };
 }
 
-// render estrellas estáticas
+function openOrderCancelSelector(orderKey, order, mode = "cancel") {
+  // mode "cancel" -> cancelar producto; "refund" -> solicitar reembolso
+  const overlay = document.getElementById("cp-overlay-selector");
+  const body = document.getElementById("cp-selector-body");
+  const title = document.getElementById("cp-selector-title");
+  if (!overlay || !body || !title) return;
+
+  title.textContent = (mode === "refund") ? "Solicitar reembolso — selecciona el producto" : "Cancelar producto — selecciona el producto";
+  body.innerHTML = "<div style='color:#9ca3af;padding:12px'>Cargando productos...</div>";
+  overlay.style.display = "flex";
+  overlay.setAttribute("aria-hidden", "false");
+  document.documentElement.style.overflow = "hidden";
+
+  // normalizar items
+  let rawItems = Array.isArray(order.items) ? order.items : (Array.isArray(order.cart) ? order.cart : []);
+  const itemsToRender = (rawItems || []).map(it => {
+    const name = it.nombre || it.name || it.title || "Producto";
+    const qty = it.cantidad || it.qty || it.quantity || 1;
+    const productKey = getProductKeyFromRaw(it, name);
+    return { name: String(name), qty, raw: it, productKey };
+  });
+
+  if (!itemsToRender.length) {
+    body.innerHTML = `<div style="padding:12px;color:#9ca3af">No hay productos en este pedido.</div>`;
+    return;
+  }
+
+  body.innerHTML = "";
+  itemsToRender.forEach((it) => {
+    const div = document.createElement("div");
+    div.className = "cp-item";
+    div.innerHTML = `
+      <div class="meta">
+        <div style="font-weight:600">${escapeHtml(it.name)}</div>
+        <div class="rv-small" style="margin-top:6px">Cantidad: ${escapeHtml(String(it.qty))} · Key: ${escapeHtml(String(it.productKey))}</div>
+      </div>
+      <div class="cp-actions">
+        <button class="cp-btn cp-action" data-product-key="${escapeHtml(it.productKey)}" style="padding:6px 10px;border-radius:6px;background:transparent;border:1px solid rgba(148,163,184,0.06);color:#e5e7eb;cursor:pointer">Seleccionar</button>
+      </div>
+    `;
+    body.appendChild(div);
+
+    // delegado por click sobre el botón dentro del div
+    div.querySelector(".cp-action").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const pk = ev.currentTarget.dataset.productKey;
+      const productObj = {
+        productKey: pk,
+        name: it.name,
+        qty: it.qty,
+        raw: it.raw
+      };
+      // Abrir modal de cancel-product para ese producto
+      cancelModule.openCancelModalFor(orderKey, productObj);
+      // Si venimos en modo refund, activar la casilla dentro del modal (pequeño timeout)
+      if (mode === "refund") {
+        setTimeout(() => {
+          try {
+            const cb = document.getElementById("cp-refund-checkbox");
+            const evidenceArea = document.getElementById("cp-evidence-area");
+            if (cb) { cb.checked = true; }
+            if (evidenceArea) { evidenceArea.style.display = "block"; }
+          } catch (e) { /* ignore */ }
+        }, 160);
+      }
+      // cerrar selector
+      overlay.style.display = "none";
+      overlay.setAttribute("aria-hidden", "true");
+      document.getElementById("cp-selector-body").innerHTML = "";
+      document.documentElement.style.overflow = "";
+    });
+  });
+}
+
+// render estrellas estáticas (si falta, la volvemos a definir)
 function renderStaticStars(n) {
   let out = "";
   for (let i=1;i<=5;i++) out += (i<=n) ? "★" : "☆";
