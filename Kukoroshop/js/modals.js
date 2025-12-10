@@ -1,4 +1,3 @@
-// js/modals.js
 import { parsePriceNumber } from "./utils.js";
 import { cart, setCart, saveCart } from "./state.js";
 import {
@@ -6,7 +5,7 @@ import {
   refreshAllCardDisplays,
   updateCartUI,
   closeCartPopup,
-  createOrderFromItems, // <-- ahora importado
+  createOrderFromItems,
 } from "./cart.js";
 import { WHATSAPP_NUMBER, API_URL } from "./config.js";
 
@@ -536,4 +535,5 @@ export async function sendToWhatsApp(lastProductsCache) {
   updateCartUI();
   refreshAllCardDisplays();
 }
+
 
