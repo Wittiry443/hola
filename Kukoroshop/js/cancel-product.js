@@ -1,4 +1,5 @@
 // js/cancel-product.js
+//a
 // Separado: cancel (cancelproduct/cancel) y refund (cancelproduct/refund)
 // Cada flujo tiene su propio modal y guardado en DB.
 // Requiere ./firebase.js que exporte `auth` y `db`.
